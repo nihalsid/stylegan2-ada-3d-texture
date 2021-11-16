@@ -1,0 +1,35 @@
+dataset_path: data/ffhq
+
+experiment: fast_dev
+seed: null
+save_epoch: 1
+sanity_steps: 1
+max_epoch: 250
+scheduler: null
+val_check_percent: 1.0
+val_check_interval: 1
+resume: null
+
+num_mapping_layers: 2
+lr_g: 0.002
+lr_d: 0.00235
+lazy_gradient_penalty_interval: 16
+lazy_path_penalty_after: 0
+lazy_path_penalty_interval: 4
+latent_dim: 512
+lambda_gp: 0.0256
+lambda_plp: 2
+
+image_size: 64
+num_eval_images: 1024
+num_vis_images: 1024
+batch_size: 16
+num_workers: 8
+
+wandb_main: False
+suffix: ''
+
+hydra:
+  output_subdir: null # Disable saving of config files. We'll do that ourselves.
+  run:
+    dir: .
