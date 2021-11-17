@@ -1,0 +1,15 @@
+torch
+ballpark
+argparse
+yaml
+pyyaml
+typing
+omegaconf
+numpy
+torchvision
+pillow
+wandb
+hydra
+pytorch-lightning
+
+

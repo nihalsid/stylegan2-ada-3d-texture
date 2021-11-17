@@ -21,7 +21,7 @@ lambda_gp: 0.0256
 lambda_plp: 2
 
 image_size: 64
-num_eval_images: 1024
+num_eval_images: 8096
 num_vis_images: 1024
 batch_size: 16
 num_workers: 8
