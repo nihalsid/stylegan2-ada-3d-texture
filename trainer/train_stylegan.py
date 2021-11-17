@@ -181,11 +181,11 @@ class StyleGAN2Trainer(pl.LightningModule):
 
     def on_train_start(self):
         if self.ema is None:
-            self.ema = ExponentialMovingAverage(self.G.parameters(), 0.99)
+            self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
 
     def on_validation_start(self):
         if self.ema is None:
-            self.ema = ExponentialMovingAverage(self.G.parameters(), 0.99)
+            self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
 
 
 @hydra.main(config_path='../config', config_name='stylegan2')
