@@ -34,7 +34,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.config = config
         self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.image_size, 3)
         self.D = Discriminator(config.image_size, 3)
-        self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.batch_size)
+        self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size)
         # print_module_summary(self.G, (torch.zeros(self.config.batch_size, self.config.latent_dim), ))
         # print_module_summary(self.D, (torch.zeros(self.config.batch_size, 3, config.image_size, config.image_size), ))
         self.grid_z = torch.randn(config.num_eval_images, self.config.latent_dim)

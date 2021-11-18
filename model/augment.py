@@ -70,7 +70,7 @@ def rotate2d_inv(theta, device=torch.device("cpu")):
 
 
 class AugmentPipe(torch.nn.Module):
-    def __init__(self, start_p, target, interval, batch_size):
+    def __init__(self, start_p, target, interval, fixed, batch_size):
         super().__init__()
 
         self.register_buffer('p', torch.ones([1]) * start_p)  # Overall multiplier for augmentation probability.
@@ -111,6 +111,8 @@ class AugmentPipe(torch.nn.Module):
         self.upsampler = SmoothUpsample()
         self.downsampler = SmoothDownsample()
         self.forward = self.forward if start_p >= 0 else identity
+        self.accumulate_real_sign = self.accumulate_real_sign if not fixed else self.accumulate_real_sign_no_op
+        self.heuristic_update = self.heuristic_update if not fixed else self.heuristic_update_no_op
 
     def accumulate_real_sign(self, sign):
         self.p_real_signs.update(sign)
@@ -243,6 +245,12 @@ class AugmentPipe(torch.nn.Module):
             images = images.reshape([batch_size, num_channels, height, width])
 
         return images
+
+    def accumulate_real_sign_no_op(self, _sign):
+        pass
+
+    def heuristic_update_no_op(self):
+        pass
 
 
 if __name__ == "__main__":

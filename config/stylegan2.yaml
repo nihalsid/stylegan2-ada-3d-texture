@@ -22,6 +22,7 @@ lambda_plp: 2
 ada_start_p: 0.  #to disable set to -1
 ada_target: 0.6
 ada_interval: 4
+ada_fixed: False
 
 image_size: 64
 num_eval_images: 8096

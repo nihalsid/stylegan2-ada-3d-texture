@@ -14,7 +14,10 @@ from util.filesystem_logger import FilesystemLogger
 
 
 def generate_experiment_name(name, config):
-    if not os.environ.get('experiment'):
+    if config.resume is not None:
+        experiment = Path(config.resume).parents[1].name
+        os.environ['experiment'] = experiment
+    elif not os.environ.get('experiment'):
         experiment = f"{datetime.datetime.now().strftime('%d%m%H%M')}_{name}_{config.experiment}"
         os.environ['experiment'] = experiment
     else:
