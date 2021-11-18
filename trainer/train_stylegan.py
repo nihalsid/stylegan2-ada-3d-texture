@@ -12,6 +12,7 @@ from torchvision.utils import save_image
 from cleanfid import fid
 
 from dataset.image import ImageDataset
+from model.augment import AugmentPipe
 from model.generator import Generator
 from model.discriminator import Discriminator
 from model.loss import PathLengthPenalty, compute_gradient_penalty
@@ -33,6 +34,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.config = config
         self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.image_size, 3)
         self.D = Discriminator(config.image_size, 3)
+        self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.batch_size)
         # print_module_summary(self.G, (torch.zeros(self.config.batch_size, self.config.latent_dim), ))
         # print_module_summary(self.D, (torch.zeros(self.config.batch_size, 3, config.image_size, config.image_size), ))
         self.grid_z = torch.randn(config.num_eval_images, self.config.latent_dim)
@@ -59,7 +61,7 @@ class StyleGAN2Trainer(pl.LightningModule):
 
         g_opt.zero_grad(set_to_none=True)
         fake, w = self.forward()
-        p_fake = self.D(fake)
+        p_fake = self.D(self.augment_pipe(fake))
 
         gen_loss = torch.nn.functional.softplus(-p_fake).mean()
         gen_loss.backward()
@@ -87,11 +89,12 @@ class StyleGAN2Trainer(pl.LightningModule):
         d_opt.zero_grad(set_to_none=True)
 
         fake, _ = self.forward()
-        p_fake = self.D(fake.detach())
+        p_fake = self.D(self.augment_pipe(fake.detach()))
         fake_loss = torch.nn.functional.softplus(p_fake).mean()
         fake_loss.backward()
 
-        p_real = self.D(batch["image"])
+        p_real = self.D(self.augment_pipe(batch["image"]))
+        self.augment_pipe.accumulate_real_sign(p_real.sign().detach())
 
         # Get discriminator loss
         real_loss = torch.nn.functional.softplus(-p_real).mean()
@@ -107,12 +110,19 @@ class StyleGAN2Trainer(pl.LightningModule):
         if (self.global_step + 1) % self.config.lazy_gradient_penalty_interval == 0:
             d_opt.zero_grad(set_to_none=True)
             batch["image"].requires_grad_()
-            p_real = self.D(batch["image"])
+            p_real = self.D(self.augment_pipe(batch["image"], disable_grid_sampling=True))
             gp = compute_gradient_penalty(batch["image"], p_real)
             disc_loss = self.config.lambda_gp * gp * self.config.lazy_gradient_penalty_interval
             disc_loss.backward()
             d_opt.step()
             self.log("rGP", gp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
+
+        self.execute_ada_heuristics()
+
+    def execute_ada_heuristics(self):
+        if (self.global_step + 1) % self.config.ada_interval == 0:
+            self.augment_pipe.heuristic_update()
+        self.log("aug_p", self.augment_pipe.p, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
 
     def validation_step(self, batch, batch_idx):
         pass
