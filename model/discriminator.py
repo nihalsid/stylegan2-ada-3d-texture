@@ -93,5 +93,5 @@ if __name__ == '__main__':
     from util.misc import print_model_parameter_count, print_module_summary
 
     model = Discriminator(img_resolution=64, img_channels=3)
-    print_module_summary(model, (torch.randn((32, 3, 64, 64)), ))
+    print_module_summary(model, (torch.randn((16, 3, 64, 64)), ))
     print_model_parameter_count(model)

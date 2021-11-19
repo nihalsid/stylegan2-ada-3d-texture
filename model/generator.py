@@ -194,5 +194,5 @@ if __name__ == '__main__':
     from util.misc import print_model_parameter_count, print_module_summary
 
     model = Generator(512, 512, 2, 64, 3)
-    print_module_summary(model, (torch.randn((32, 512)), ))
+    print_module_summary(model, (torch.randn((16, 512)), ))
     print_model_parameter_count(model)

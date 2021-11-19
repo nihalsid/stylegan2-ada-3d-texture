@@ -19,11 +19,12 @@ from model.loss import PathLengthPenalty, compute_gradient_penalty
 from trainer import create_trainer
 
 
-# todo:
-# 0. Test on FFHQ 64x64
-# 1. Add augmentation
-# 2. Can we use StyleGAN's ADA-IN Generator instead?
 from util.misc import print_module_summary
+
+
+torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.allow_tf32 = True
+torch.backends.cudnn.deterministic = False
 
 
 class StyleGAN2Trainer(pl.LightningModule):
