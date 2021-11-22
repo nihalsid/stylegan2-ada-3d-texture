@@ -11,7 +11,7 @@ from torch_ema import ExponentialMovingAverage
 from torchvision.utils import save_image
 from cleanfid import fid
 
-from dataset.image import ImageDataset
+from dataset.mesh import ImageDataset
 from model.augment import AugmentPipe
 from model.generator import Generator
 from model.discriminator import Discriminator

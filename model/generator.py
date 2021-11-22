@@ -5,13 +5,13 @@ from model import activation_funcs, FullyConnectedLayer, clamp_gain, modulated_c
 
 class Generator(torch.nn.Module):
 
-    def __init__(self, z_dim, w_dim, w_num_layers, img_resolution, img_channels):
+    def __init__(self, z_dim, w_dim, w_num_layers, num_faces, color_channels):
         super().__init__()
         self.z_dim = z_dim
         self.w_dim = w_dim
-        self.img_resolution = img_resolution
-        self.img_channels = img_channels
-        self.synthesis = SynthesisNetwork(w_dim=w_dim, img_resolution=img_resolution, img_channels=img_channels)
+        self.num_faces = num_faces
+        self.color_channels = color_channels
+        self.synthesis = SynthesisNetwork(w_dim=w_dim, num_faces=num_faces, color_channels=color_channels)
         self.num_ws = self.synthesis.num_ws
         self.mapping = MappingNetwork(z_dim=z_dim, w_dim=w_dim, num_ws=self.num_ws, num_layers=w_num_layers)
 
@@ -23,41 +23,40 @@ class Generator(torch.nn.Module):
 
 class SynthesisNetwork(torch.nn.Module):
 
-    def __init__(self, w_dim, img_resolution, img_channels, channel_base=16384, channel_max=512):
+    def __init__(self, w_dim, num_faces, color_channels, channel_base=16384, channel_max=512):
         super().__init__()
         self.num_ws = 10
         self.w_dim = w_dim
-        self.img_resolution = img_resolution
-        self.img_resolution_log2 = int(np.log2(img_resolution))
-        self.img_channels = img_channels
-        self.block_resolutions = [2 ** i for i in range(2, self.img_resolution_log2 + 1)]
-        channels_dict = {res: min(channel_base // res, channel_max) for res in self.block_resolutions}
+        self.num_faces = num_faces
+        self.color_channels = color_channels
+        block_pow_2 = [2 ** i for i in range(2, len(self.num_faces) + 1)]
+        channels_dict = {res: min(channel_base // res, channel_max) for res in block_pow_2}
         self.blocks = torch.nn.ModuleList()
-        self.first_block = SynthesisPrologue(channels_dict[self.block_resolutions[0]], w_dim=w_dim, resolution=self.block_resolutions[0], img_channels=img_channels)
-        for res in self.block_resolutions[1:]:
-            in_channels = channels_dict[res // 2]
-            out_channels = channels_dict[res]
-            block = SynthesisBlock(in_channels, out_channels, w_dim=w_dim, resolution=res, img_channels=img_channels)
+        self.first_block = SynthesisPrologue(channels_dict[block_pow_2[0]], w_dim=w_dim, num_face=num_faces[0], color_channels=color_channels)
+        for cidx, cdict_key in enumerate(block_pow_2[1:]):
+            in_channels = channels_dict[cdict_key // 2]
+            out_channels = channels_dict[cdict_key]
+            block = SynthesisBlock(in_channels, out_channels, w_dim=w_dim, num_face=num_faces[cidx], color_channels=color_channels)
             self.blocks.append(block)
 
     def forward(self, ws, noise_mode='random'):
         split_ws = [ws[:, 0:2, :], ws[:, 1:4, :], ws[:, 3:6, :], ws[:, 5:8, :], ws[:, 7:10, :]]
         x, img = self.first_block(split_ws[0], noise_mode)
-        for i in range(len(self.block_resolutions) - 1):
+        for i in range(len(self.num_faces) - 1):
             x, img = self.blocks[i](x, img, split_ws[i + 1], noise_mode)
         return img
 
 
 class SynthesisPrologue(torch.nn.Module):
 
-    def __init__(self, out_channels, w_dim, resolution, img_channels):
+    def __init__(self, out_channels, w_dim, num_face, color_channels):
         super().__init__()
         self.w_dim = w_dim
-        self.resolution = resolution
-        self.img_channels = img_channels
-        self.const = torch.nn.Parameter(torch.randn([out_channels, resolution, resolution]))
-        self.conv1 = SynthesisLayer(out_channels, out_channels, w_dim=w_dim, resolution=resolution)
-        self.torgb = ToRGBLayer(out_channels, img_channels, w_dim=w_dim)
+        self.num_face = num_face
+        self.color_channels = color_channels
+        self.const = torch.nn.Parameter(torch.randn([out_channels, num_face]))
+        self.conv1 = SynthesisLayer(out_channels, out_channels, w_dim=w_dim, num_face=num_face)
+        self.torgb = ToRGBLayer(out_channels, color_channels, w_dim=w_dim)
 
     def forward(self, ws, noise_mode):
         w_iter = iter(ws.unbind(dim=1))
@@ -69,18 +68,18 @@ class SynthesisPrologue(torch.nn.Module):
 
 class SynthesisBlock(torch.nn.Module):
 
-    def __init__(self, in_channels, out_channels, w_dim, resolution, img_channels):
+    def __init__(self, in_channels, out_channels, w_dim, num_face, color_channels):
         super().__init__()
         self.in_channels = in_channels
         self.w_dim = w_dim
-        self.resolution = resolution
-        self.img_channels = img_channels
+        self.num_face = num_face
+        self.color_channels = color_channels
         self.num_conv = 0
         self.num_torgb = 0
         self.resampler = SmoothUpsample()
-        self.conv0 = SynthesisLayer(in_channels, out_channels, w_dim=w_dim, resolution=resolution, resampler=self.resampler)
-        self.conv1 = SynthesisLayer(out_channels, out_channels, w_dim=w_dim, resolution=resolution)
-        self.torgb = ToRGBLayer(out_channels, img_channels, w_dim=w_dim)
+        self.conv0 = SynthesisLayer(in_channels, out_channels, w_dim=w_dim, num_face=num_face, resampler=self.resampler)
+        self.conv1 = SynthesisLayer(out_channels, out_channels, w_dim=w_dim, num_face=num_face)
+        self.torgb = ToRGBLayer(out_channels, color_channels, w_dim=w_dim)
 
     def forward(self, x, img, ws, noise_mode):
         w_iter = iter(ws.unbind(dim=1))
@@ -112,9 +111,9 @@ class ToRGBLayer(torch.nn.Module):
 
 class SynthesisLayer(torch.nn.Module):
 
-    def __init__(self, in_channels, out_channels, w_dim, resolution, kernel_size=3, resampler=identity, activation='lrelu'):
+    def __init__(self, in_channels, out_channels, w_dim, num_face, kernel_size=3, resampler=identity, activation='lrelu'):
         super().__init__()
-        self.resolution = resolution
+        self.num_face = num_face
         self.resampler = resampler
         self.activation = activation_funcs[activation]['fn']
         self.activation_gain = activation_funcs[activation]['def_gain']
@@ -122,7 +121,7 @@ class SynthesisLayer(torch.nn.Module):
         self.affine = FullyConnectedLayer(w_dim, in_channels, bias_init=1)
         self.weight = torch.nn.Parameter(torch.randn([out_channels, in_channels, kernel_size, kernel_size]))
 
-        self.register_buffer('noise_const', torch.randn([resolution, resolution]))
+        self.register_buffer('noise_const', torch.randn([num_face,]))
         self.noise_strength = torch.nn.Parameter(torch.zeros([1]))
 
         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
@@ -132,7 +131,7 @@ class SynthesisLayer(torch.nn.Module):
 
         noise = None
         if noise_mode == 'random':
-            noise = torch.randn([x.shape[0], 1, self.resolution, self.resolution], device=x.device) * self.noise_strength
+            noise = torch.randn([x.shape[0], 1, self.num_face], device=x.device) * self.noise_strength
         if noise_mode == 'const':
             noise = self.noise_const * self.noise_strength
 

@@ -11,5 +11,9 @@ pillow
 wandb
 hydra
 pytorch-lightning
-
-
+tqdm
+torchmetrics
+nvdiffrast
+pyrender
+trimesh
+scipy

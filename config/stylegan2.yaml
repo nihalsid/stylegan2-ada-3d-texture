@@ -1,4 +1,5 @@
-dataset_path: data/ffhq
+dataset_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape/CubeTexturesForGraphQuad_gan_FC_processed
+mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturesForGraphQuad
 
 experiment: fast_dev
 seed: null
@@ -10,6 +11,7 @@ val_check_percent: 1.0
 val_check_interval: 1
 resume: null
 
+views_per_sample: 4
 num_mapping_layers: 2
 lr_g: 0.002
 lr_d: 0.00235
