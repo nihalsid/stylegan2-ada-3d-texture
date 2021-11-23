@@ -59,10 +59,10 @@ def to_vertex_colors_scatter(face_colors, batch):
 
 class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
-    def __init__(self, config):
+    def __init__(self, config, limit_dataset_size=None):
         self.dataset_directory = Path(config.dataset_path)
         self.mesh_directory = Path(config.mesh_path)
-        self.items = list(x.stem for x in Path(config.dataset_path).iterdir())
+        self.items = list(x.stem for x in Path(config.dataset_path).iterdir())[:limit_dataset_size]
         self.target_name = "model_normalized.obj"
         self.mask = lambda x, bs: torch.ones((x.shape[0],)).float().to(x.device)
         self.indices_src, self.indices_dest_i, self.indices_dest_j, self.faces_to_uv = [], [], [], None

@@ -11,8 +11,8 @@ def normalize_2nd_moment(x, dim=1, eps=1e-8):
     return x * (x.square().mean(dim=dim, keepdim=True) + eps).rsqrt()
 
 
-def identity(x):
-    return x
+def identity(*x):
+    return x[0]
 
 
 def leaky_relu_0_2(x):

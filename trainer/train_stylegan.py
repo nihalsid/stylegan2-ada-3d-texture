@@ -11,7 +11,7 @@ from torch_ema import ExponentialMovingAverage
 from torchvision.utils import save_image
 from cleanfid import fid
 
-from dataset.mesh import ImageDataset
+from dataset.mesh import FaceGraphMeshDataset
 from model.augment import AugmentPipe
 from model.generator import Generator
 from model.discriminator import Discriminator
@@ -39,8 +39,8 @@ class StyleGAN2Trainer(pl.LightningModule):
         # print_module_summary(self.G, (torch.zeros(self.config.batch_size, self.config.latent_dim), ))
         # print_module_summary(self.D, (torch.zeros(self.config.batch_size, 3, config.image_size, config.image_size), ))
         self.grid_z = torch.randn(config.num_eval_images, self.config.latent_dim)
-        self.train_set = ImageDataset(config.dataset_path, config.image_size)
-        self.val_set = ImageDataset(config.dataset_path, config.image_size, config.num_eval_images)
+        self.train_set = FaceGraphMeshDataset(config.dataset_path)
+        self.val_set = FaceGraphMeshDataset(config.dataset_path, config.num_eval_images)
         self.automatic_optimization = False
         self.path_length_penalty = PathLengthPenalty(0.01, 2)
         self.ema = None
