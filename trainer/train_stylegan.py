@@ -161,7 +161,7 @@ class StyleGAN2Trainer(pl.LightningModule):
                 fake_render = self.render(self.G(batch['graph_data'], latents[iter_idx].to(self.device), noise_mode='const'), batch).cpu()
                 save_image(real_render, odir_samples / f"real_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 save_image(fake_render, odir_samples / f"fake_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
-                texture = self.get_face_colors_as_texture_maps(batch['y'])
+                texture = self.get_face_colors_as_texture_maps(batch['y']).cpu()
                 for batch_idx in range(texture.shape[0]):
                     save_image(texture[batch_idx], odir_real / f"{iter_idx}_{batch_idx}.jpg", value_range=(-1, 1), normalize=True)
         fid_score = fid.compute_fid(odir_real, odir_fake)
@@ -243,7 +243,7 @@ class StyleGAN2Trainer(pl.LightningModule):
 
 @hydra.main(config_path='../config', config_name='stylegan2')
 def main(config):
-    trainer = create_trainer("StyleGAN2", config)
+    trainer = create_trainer("StyleGAN23D", config)
     model = StyleGAN2Trainer(config)
     trainer.fit(model)
 
