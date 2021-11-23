@@ -70,6 +70,7 @@ def rotate2d_inv(theta, device=torch.device("cpu")):
 
 
 class AugmentPipe(torch.nn.Module):
+
     def __init__(self, start_p, target, interval, fixed, batch_size):
         super().__init__()
 

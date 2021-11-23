@@ -66,7 +66,7 @@ class SmoothDownsample(torch.nn.Module):
 
     def forward(self, x: torch.Tensor):
         b, c, h, w = x.shape
-        x = x.view(-1, 1, h, w)
+        x = x.reshape(-1, 1, h, w)
         x = self.pad(x)
         x = torch.nn.functional.conv2d(x, self.kernel).view(b, c, h, w)
         x = torch.nn.functional.interpolate(x, scale_factor=0.5, mode='nearest', recompute_scale_factor=False)
@@ -88,7 +88,7 @@ class SmoothUpsample(torch.nn.Module):
 
     def forward(self, x: torch.Tensor):
         b, c, h, w = x.shape
-        x = x.view(-1, 1, h, w)
+        x = x.reshape(-1, 1, h, w)
         x = torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
         x = self.pad(x)
         x = torch.nn.functional.conv2d(x, self.kernel).view(b, c, h * 2, w * 2)

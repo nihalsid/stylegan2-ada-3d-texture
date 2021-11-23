@@ -57,9 +57,9 @@ class SynthesisNetwork(torch.nn.Module):
         for i in range(len(self.num_faces) - 1):
             block_level -= 1
             sub_neighborhoods, is_pad, pads, pool_maps = [neighborhoods[block_level + 1], neighborhoods[block_level]], \
-                                                        [graph_data['is_pad'][block_level + 1], graph_data['is_pad'][block_level]], \
-                                                        [graph_data['pads'][block_level + 1], graph_data['pads'][block_level]], \
-                                                        [appended_pool_maps[block_level + 1], appended_pool_maps[block_level]]
+                                                         [graph_data['is_pad'][block_level + 1], graph_data['is_pad'][block_level]], \
+                                                         [graph_data['pads'][block_level + 1], graph_data['pads'][block_level]], \
+                                                         [appended_pool_maps[block_level + 1], appended_pool_maps[block_level]]
             x, face_colors = self.blocks[i](sub_neighborhoods, is_pad, pads, pool_maps, x, face_colors, split_ws[i + 1], noise_mode)
 
         return face_colors

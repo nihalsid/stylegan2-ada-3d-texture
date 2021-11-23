@@ -30,6 +30,17 @@ def to_device(batch, device):
     return batch
 
 
+def to_device_graph_data(batch, device):
+    for k in batch.keys():
+        if isinstance(batch[k], torch.Tensor):
+            batch[k] = batch[k].to(device)
+        elif isinstance(batch[k], list):
+            for m in range(len(batch[k])):
+                if isinstance(batch[k][m], torch.Tensor):
+                    batch[k][m] = batch[k][m].to(device)
+    return batch
+
+
 def generate_random_camera(loc):
     x_angles, y_angles = list(range(90, 270, 5)), list(range(0, 360, 5))
     weight_fn = lambda x: 0.5 + 0.125 * math.cos(2 * (math.pi / 45) * x)
