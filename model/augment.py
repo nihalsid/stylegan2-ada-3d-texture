@@ -74,7 +74,7 @@ class AugmentPipe(torch.nn.Module):
     def __init__(self, start_p, target, interval, fixed, batch_size):
         super().__init__()
 
-        self.register_buffer('p', torch.ones([1]) * start_p)  # Overall multiplier for augmentation probability.
+        self.register_buffer('p', torch.ones([1]).float() * start_p)  # Overall multiplier for augmentation probability.
         self.p_real_signs = MeanMetric()
 
         self.ada_target = target

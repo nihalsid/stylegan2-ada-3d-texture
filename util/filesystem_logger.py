@@ -3,7 +3,6 @@ import shutil
 from pathlib import Path
 from typing import Dict, Optional, Union
 
-import yaml
 from omegaconf import OmegaConf
 from pytorch_lightning.loggers import LightningLoggerBase
 from pytorch_lightning.loggers.base import rank_zero_experiment, DummyExperiment
