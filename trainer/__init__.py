@@ -1,4 +1,7 @@
 import os
+import signal
+import sys
+import traceback
 from pathlib import Path
 from random import randint
 import datetime
@@ -11,6 +14,27 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.plugins import DDPPlugin
 
 from util.filesystem_logger import FilesystemLogger
+
+
+def print_traceback_handler(sig, frame):
+    print(f'Received signal {sig}')
+    bt = ''.join(traceback.format_stack())
+    print(f'Requested stack trace:\n{bt}')
+
+
+def quit_handler(sig, frame):
+    print(f'Received signal {sig}, quitting.')
+    sys.exit(1)
+
+
+def register_debug_signal_handlers(sig=signal.SIGUSR1, handler=print_traceback_handler):
+    print(f'Setting signal {sig} handler {handler}')
+    signal.signal(sig, handler)
+
+
+def register_quit_signal_handlers(sig=signal.SIGUSR2, handler=quit_handler):
+    print(f'Setting signal {sig} handler {handler}')
+    signal.signal(sig, handler)
 
 
 def generate_experiment_name(name, config):
@@ -37,6 +61,9 @@ def create_trainer(name, config):
 
     seed_everything(config.seed)
 
+    register_debug_signal_handlers()
+    register_quit_signal_handlers()
+
     # noinspection PyUnusedLocal
     filesystem_logger = FilesystemLogger(config)
     logger = WandbLogger(project=f'{name}{config.suffix}[{ds_name}]',
@@ -52,7 +79,7 @@ def create_trainer(name, config):
     if gpu_count > 1:
         trainer = Trainer(gpus=-1,
                           accelerator='ddp',
-                          plugins=DDPPlugin(find_unused_parameters=False),
+                          plugins=DDPPlugin(find_unused_parameters=True),
                           num_sanity_val_steps=config.sanity_steps,
                           max_epochs=config.max_epoch,
                           limit_val_batches=config.val_check_percent,

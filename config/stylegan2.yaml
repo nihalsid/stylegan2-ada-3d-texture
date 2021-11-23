@@ -20,7 +20,7 @@ lazy_path_penalty_interval: 4
 latent_dim: 512
 lambda_gp: 0.5
 lambda_plp: 2
-ada_start_p: -1  #to disable set to -1
+ada_start_p: -1.  #to disable set to -1
 ada_target: 0.6
 ada_interval: 4
 ada_fixed: False
