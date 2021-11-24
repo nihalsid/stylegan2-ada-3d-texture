@@ -1,5 +1,9 @@
 dataset_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape/CubeTexturesForGraphQuad_gan_FC_processed
 mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturesForGraphQuad
+mesh_resolution: 128
+#dataset_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape/CubeTexturePlaneQuad32_FC_processed
+#mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturePlaneQuad32
+#mesh_resolution: 32
 
 experiment: fast_dev
 seed: null

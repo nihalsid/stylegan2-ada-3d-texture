@@ -54,6 +54,15 @@ def generate_random_camera(loc):
     return camera_pose
 
 
+def generate_fixed_camera(loc):
+    camera_pose = np.eye(4)
+    camera_pose[:3, :3] = Rotation.from_euler('y', 0, degrees=True).as_matrix() @ Rotation.from_euler('z', 180, degrees=True).as_matrix() @ Rotation.from_euler('x', 0, degrees=True).as_matrix()
+    # camera_translation = camera_pose[:3, :3] @ np.array([0, 0, 1.025]) + loc
+    camera_translation = camera_pose[:3, :3] @ np.array([0, 0, 1.925]) + loc
+    camera_pose[:3, 3] = camera_translation
+    return camera_pose
+
+
 def get_default_perspective_cam():
     camera = np.array([[886.81, 0., 512., 0.],
                        [0., 886.81, 512., 0.],
@@ -77,9 +86,13 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.target_name = "model_normalized.obj"
         self.mask = lambda x, bs: torch.ones((x.shape[0],)).float().to(x.device)
         self.indices_src, self.indices_dest_i, self.indices_dest_j, self.faces_to_uv = [], [], [], None
+        self.mesh_resolution = config.mesh_resolution
         self.setup_cube_texture_fast_visualization_buffers()
-        self.views_per_sample = config.views_per_sample
         self.projection_matrix = intrinsic_to_projection(get_default_perspective_cam()).float()
+        self.plane = "Plane" in self.dataset_directory.name
+        self.generate_camera = generate_fixed_camera if self.plane else generate_random_camera
+        self.views_per_sample = 1 if self.plane else config.views_per_sample
+        print("Plane Rendering: ", self.plane)
 
     def __len__(self):
         return len(self.items)
@@ -97,7 +110,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
         # noinspection PyTypeChecker
         mesh = trimesh.load(self.mesh_directory / '_'.join(selected_item.split('_')[:-2]) / self.target_name, process=False)
-        mvp = torch.stack([torch.matmul(self.projection_matrix, torch.from_numpy(np.linalg.inv(generate_random_camera((mesh.bounds[0] + mesh.bounds[1]) / 2))).float())
+        mvp = torch.stack([torch.matmul(self.projection_matrix, torch.from_numpy(np.linalg.inv(self.generate_camera((mesh.bounds[0] + mesh.bounds[1]) / 2))).float())
                            for _ in range(self.views_per_sample)], dim=0)
         vertices = torch.from_numpy(mesh.vertices).float()
         indices = torch.from_numpy(mesh.faces).int()
@@ -137,7 +150,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
     def to_image(self, face_colors, level_mask):
         batch_size = level_mask.max() + 1
-        image = torch.zeros((batch_size, 3, 128, 128), device=face_colors.device)
+        image = torch.zeros((batch_size, 3, self.mesh_resolution, self.mesh_resolution), device=face_colors.device)
         indices_dest_i = torch.tensor(self.indices_dest_i * batch_size, device=face_colors.device).long()
         indices_dest_j = torch.tensor(self.indices_dest_j * batch_size, device=face_colors.device).long()
         indices_src = torch.tensor(self.indices_src * batch_size, device=face_colors.device).long()
@@ -159,8 +172,8 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         d = vertex_to_uv[faces_to_vertices[:, 3], :]
         self.faces_to_uv = (a + b + c + d) / 4
         for v_idx in range(self.faces_to_uv.shape[0]):
-            j = int(round(self.faces_to_uv[v_idx][0] * 127))
-            i = 127 - int(round(self.faces_to_uv[v_idx][1] * 127))
+            j = int(round(self.faces_to_uv[v_idx][0] * (self.mesh_resolution - 1)))
+            i = (self.mesh_resolution - 1) - int(round(self.faces_to_uv[v_idx][1] * (self.mesh_resolution - 1)))
             self.indices_dest_i.append(i)
             self.indices_dest_j.append(j)
             self.indices_src.append(v_idx)
