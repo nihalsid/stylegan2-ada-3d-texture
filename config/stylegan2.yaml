@@ -1,9 +1,9 @@
-dataset_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape/CubeTexturesForGraphQuad_gan_FC_processed
-mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturesForGraphQuad
-mesh_resolution: 128
-#dataset_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape/CubeTexturePlaneQuad32_FC_processed
-#mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturePlaneQuad32
-#mesh_resolution: 32
+#dataset_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape/CubeTexturesForGraphQuad_gan_FC_processed
+#mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturesForGraphQuad
+#mesh_resolution: 128
+dataset_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape/CubeTexturePlaneQuad32_FC_processed
+mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturePlaneQuad32
+mesh_resolution: 32
 
 experiment: fast_dev
 seed: null
@@ -16,21 +16,25 @@ val_check_interval: 1
 resume: null
 
 num_mapping_layers: 2
-lr_g: 0.0002
-lr_d: 0.000235
+#lr_g: 0.0002
+#lr_d: 0.000235
+lr_g: 0.002
+lr_d: 0.00235
 lazy_gradient_penalty_interval: 16
 lazy_path_penalty_after: 0
 lazy_path_penalty_interval: 4
 latent_dim: 512
-lambda_gp: 0.5
+lambda_gp: 1
 lambda_plp: 2
-ada_start_p: -1.  #to disable set to -1
+ada_start_p: 0.  #to disable set to -1
 ada_target: 0.6
 ada_interval: 4
 ada_fixed: False
 
+#image_size: 64
+#num_faces: [6144, 1536, 384, 96, 24]
 image_size: 64
-num_faces: [6144, 1536, 384, 96, 24]
+num_faces: [1024, 256, 64, 16]
 num_eval_images: 2048
 num_vis_images: 1024
 batch_size: 16

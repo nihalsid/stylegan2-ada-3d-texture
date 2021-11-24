@@ -33,7 +33,7 @@ class SynthesisNetwork(torch.nn.Module):
         block_pow_2 = [2 ** i for i in range(2, len(self.num_faces) + 2)]
         channels_dict = {res: min(channel_base // res, channel_max) for res in block_pow_2}
         self.blocks = torch.nn.ModuleList()
-        block_level = 4
+        block_level = len(block_pow_2) - 1
         self.first_block = SynthesisPrologue(channels_dict[block_pow_2[0]], w_dim=w_dim, num_face=num_faces[block_level], color_channels=color_channels)
         for cdict_key in block_pow_2[1:]:
             block_level -= 1
@@ -48,7 +48,7 @@ class SynthesisNetwork(torch.nn.Module):
         split_ws = [ws[:, 0:2, :], ws[:, 1:4, :], ws[:, 3:6, :], ws[:, 5:8, :], ws[:, 7:10, :]]
         neighborhoods = [graph_data['face_neighborhood']] + graph_data['sub_neighborhoods']
         appended_pool_maps = [None] + graph_data['pool_maps']
-        block_level = 4
+        block_level = len(self.num_faces) - 1
         x, face_colors = self.first_block(neighborhoods[block_level],
                                           graph_data['is_pad'][block_level],
                                           graph_data['pads'][block_level],
