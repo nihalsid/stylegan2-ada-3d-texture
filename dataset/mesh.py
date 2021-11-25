@@ -158,6 +158,12 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         return image
 
     @staticmethod
+    def to_face_colors(texture, face_color_idx, face_batch_idx, indices_img_i, indices_img_j):
+        face_colors = torch.zeros((face_color_idx.shape[0], 3), device=texture.device)
+        face_colors[face_color_idx, :] = texture[face_batch_idx, :, indices_img_i, indices_img_j]
+        return face_colors
+
+    @staticmethod
     def batch_mask(t, graph_data, idx, level=0):
         return t[graph_data['level_masks'][level] == idx]
 
