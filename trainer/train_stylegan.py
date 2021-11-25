@@ -48,7 +48,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.register_buffer("face_color_idx", torch.tensor(self.train_set.indices_src * self.config.batch_size).long() + level_mask * len(self.train_set.indices_src))
         self.register_buffer("face_batch_idx", level_mask)
         self.register_buffer("indices_img_i", torch.tensor(self.train_set.indices_dest_i * self.config.batch_size).long())
-        self.register_buffer("indices_img_j", torch.tensor(self.train_set.indices_dest_i * self.config.batch_size).long())
+        self.register_buffer("indices_img_j", torch.tensor(self.train_set.indices_dest_j * self.config.batch_size).long())
 
     def configure_optimizers(self):
         g_opt = torch.optim.Adam(list(self.G.parameters()), lr=self.config.lr_g, betas=(0.0, 0.99), eps=1e-8)
