@@ -1,9 +1,12 @@
 #dataset_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape/CubeTexturesForGraphQuad_gan_FC_processed
 #mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturesForGraphQuad
 #mesh_resolution: 128
-dataset_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape/CubeTexturePlaneQuad32_FC_processed
-mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturePlaneQuad32
-mesh_resolution: 32
+#dataset_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape/CubeTexturePlaneQuad32_FC_processed
+#mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturePlaneQuad32
+#mesh_resolution: 32
+dataset_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape/CubeTexturesForGraphQuad32_FC_processed
+mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturesForGraphQuad32
+mesh_resolution: 64
 
 experiment: fast_dev
 seed: null
@@ -33,8 +36,10 @@ ada_fixed: False
 
 #image_size: 64
 #num_faces: [6144, 1536, 384, 96, 24]
-image_size: 32
-num_faces: [1024, 256, 64, 16]
+#image_size: 32
+#num_faces: [1024, 256, 64, 16]
+image_size: 64
+num_faces: [1536, 384, 96, 24]
 num_eval_images: 2048
 num_vis_images: 1024
 batch_size: 16

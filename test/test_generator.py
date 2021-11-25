@@ -13,7 +13,7 @@ def test_generator(config):
     batch_size = 16
     dataset = FaceGraphMeshDataset(config)
     dataloader = GraphDataLoader(dataset, batch_size=batch_size, num_workers=0)
-    G = Generator(512, 512, 2, [6144, 1536, 384, 96, 24], 3).cuda()
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3).cuda()
     for batch_idx, batch in enumerate(tqdm(dataloader)):
         # sanity test forward pass
         batch = to_device(batch, torch.device("cuda:0"))
