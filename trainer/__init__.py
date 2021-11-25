@@ -75,8 +75,12 @@ def create_trainer(name, config):
                                           save_top_k=-1,
                                           verbose=False,
                                           every_n_epochs=config.save_epoch)
+
     gpu_count = torch.cuda.device_count()
+
     if gpu_count > 1:
+
+        config.val_check_interval *= gpu_count
         trainer = Trainer(gpus=-1,
                           accelerator='ddp',
                           plugins=DDPPlugin(find_unused_parameters=True),
