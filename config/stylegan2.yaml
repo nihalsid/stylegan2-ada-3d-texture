@@ -12,7 +12,7 @@ experiment: fast_dev
 seed: null
 save_epoch: 1
 sanity_steps: 1
-max_epoch: 1000
+max_epoch: 2000
 scheduler: null
 val_check_percent: 1.0
 val_check_interval: 1

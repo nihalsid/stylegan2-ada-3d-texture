@@ -161,11 +161,6 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     def batch_mask(t, graph_data, idx, level=0):
         return t[graph_data['level_masks'][level] == idx]
 
-    @staticmethod
-    def to_face_colors(texture, n_faces):
-        b, c, h, w = texture.shape
-        return texture.reshape((b, c, h * w)).permute((0, 2, 1))[:, :n_faces, :].reshape(-1, 3)
-
     def setup_cube_texture_fast_visualization_buffers(self):
         # noinspection PyTypeChecker
         mesh = trimesh.load(self.mesh_directory / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
