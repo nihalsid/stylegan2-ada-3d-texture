@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from model import activation_funcs, FullyConnectedLayer, clamp_gain, normalize_2nd_moment, identity
+from model import activation_funcs, FullyConnectedLayer, clamp_gain, normalize_2nd_moment
 from model.graph import create_faceconv_input, SmoothUpsample, modulated_face_conv
 
 

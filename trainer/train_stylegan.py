@@ -13,7 +13,7 @@ from cleanfid import fid
 from dataset.mesh import FaceGraphMeshDataset, to_vertex_colors_scatter, GraphDataLoader, to_device_graph_data, to_device
 from model.augment import AugmentPipe
 from model.differentiable_renderer import DifferentiableRenderer
-from model.generator import Generator
+from model.graph_generator import Generator
 from model.discriminator import Discriminator
 from model.loss import PathLengthPenalty, compute_gradient_penalty
 from trainer import create_trainer
