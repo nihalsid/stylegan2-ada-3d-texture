@@ -21,7 +21,10 @@ def render(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ranges):
     rast_out, _ = dr.rasterize(glctx, pos_clip, pos_idx, resolution=[resolution, resolution], ranges=ranges)
     color, _ = dr.interpolate(vtx_col[None, ...], rast_out, col_idx)
     color = dr.antialias(color, rast_out, pos_clip, pos_idx)
-    return color
+    mask = color[..., -1:] == 0
+    one_tensor = torch.as_tensor(1.0, dtype=torch.float32, device=color.device)
+    color = torch.where(mask, one_tensor, color)
+    return color[:, :, :, :-1]
 
 
 def intrinsic_to_projection(intrinsic_matrix):

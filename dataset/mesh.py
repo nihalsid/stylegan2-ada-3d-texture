@@ -47,9 +47,8 @@ def generate_random_camera(loc):
     weights_x, weights_y = [weight_fn(x) for x in x_angles], [weight_fn(y) for y in y_angles]
     x_angle, y_angle = random.choices(x_angles, weights_x, k=1)[0], random.choices(y_angles, weights_y, k=1)[0]
     camera_pose = np.eye(4)
-    camera_pose[:3, :3] = Rotation.from_euler('y', y_angle, degrees=True).as_matrix() @ Rotation.from_euler('z', 180, degrees=True).as_matrix() @ Rotation.from_euler('x', x_angle, degrees=True).as_matrix()
-    # camera_translation = camera_pose[:3, :3] @ np.array([0, 0, 1.025]) + loc
-    camera_translation = camera_pose[:3, :3] @ np.array([0, 0, 1.925]) + loc
+    camera_pose[:3, :3] = Rotation.from_euler('y', y_angle, degrees=True).as_matrix() @ Rotation.from_euler('z', 180, degrees=True).as_matrix() @ Rotation.from_euler('x', 180, degrees=True).as_matrix()
+    camera_translation = camera_pose[:3, :3] @ np.array([0, 0, 1.250]) + loc
     camera_pose[:3, 3] = camera_translation
     return camera_pose
 
@@ -57,8 +56,7 @@ def generate_random_camera(loc):
 def generate_fixed_camera(loc):
     camera_pose = np.eye(4)
     camera_pose[:3, :3] = Rotation.from_euler('y', 0, degrees=True).as_matrix() @ Rotation.from_euler('z', 180, degrees=True).as_matrix() @ Rotation.from_euler('x', 0, degrees=True).as_matrix()
-    # camera_translation = camera_pose[:3, :3] @ np.array([0, 0, 1.025]) + loc
-    camera_translation = camera_pose[:3, :3] @ np.array([0, 0, 1.925]) + loc
+    camera_translation = camera_pose[:3, :3] @ np.array([0, 0, 1.250]) + loc
     camera_pose[:3, 3] = camera_translation
     return camera_pose
 
@@ -72,8 +70,9 @@ def get_default_perspective_cam():
 
 
 def to_vertex_colors_scatter(face_colors, batch):
-    vertex_colors = torch.zeros((batch["vertices"].shape[0] // batch["mvp"].shape[1], face_colors.shape[1])).to(face_colors.device)
+    vertex_colors = torch.zeros((batch["vertices"].shape[0] // batch["mvp"].shape[1], face_colors.shape[1] + 1)).to(face_colors.device)
     torch_scatter.scatter_mean(face_colors.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 3), batch["indices_quad"].reshape(-1).long(), dim=0, out=vertex_colors)
+    vertex_colors[:, 3] = 1
     return vertex_colors[batch['vertex_ctr'], :]
 
 
@@ -82,12 +81,10 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     def __init__(self, config, limit_dataset_size=None):
         self.dataset_directory = Path(config.dataset_path)
         self.mesh_directory = Path(config.mesh_path)
-        self.items = list(x.stem for x in Path(config.dataset_path).iterdir())[:limit_dataset_size]
+        self.items = list(x.stem for x in Path(config.dataset_path).iterdir())[:limit_dataset_size] * 5000
         self.target_name = "model_normalized.obj"
         self.mask = lambda x, bs: torch.ones((x.shape[0],)).float().to(x.device)
         self.indices_src, self.indices_dest_i, self.indices_dest_j, self.faces_to_uv = [], [], [], None
-        self.mesh_resolution = config.mesh_resolution
-        self.setup_cube_texture_fast_visualization_buffers()
         self.projection_matrix = intrinsic_to_projection(get_default_perspective_cam()).float()
         self.plane = "Plane" in self.dataset_directory.name
         self.generate_camera = generate_fixed_camera if self.plane else generate_random_camera
@@ -109,13 +106,17 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         level_masks = [torch.zeros(pt_arxiv['conv_data'][i][0].shape[0]).long() for i in range(len(pt_arxiv['conv_data']))]
 
         # noinspection PyTypeChecker
-        mesh = trimesh.load(self.mesh_directory / '_'.join(selected_item.split('_')[:-2]) / self.target_name, process=False)
+        mesh = trimesh.load(self.mesh_directory / selected_item / self.target_name, process=False)
         mvp = torch.stack([torch.matmul(self.projection_matrix, torch.from_numpy(np.linalg.inv(self.generate_camera((mesh.bounds[0] + mesh.bounds[1]) / 2))).float())
                            for _ in range(self.views_per_sample)], dim=0)
         vertices = torch.from_numpy(mesh.vertices).float()
         indices = torch.from_numpy(mesh.faces).int()
         tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
         vctr = torch.tensor(list(range(vertices.shape[0]))).long()
+        r, g, b = random.randint(0, 255) / 255. - 0.5, random.randint(0, 255) / 255. - 0.5, random.randint(0, 255) / 255. - 0.5
+        pt_arxiv['target_colors'][:, 0] = r
+        pt_arxiv['target_colors'][:, 1] = g
+        pt_arxiv['target_colors'][:, 2] = b
         return {
             "name": selected_item,
             "y": pt_arxiv['target_colors'].float() * 2,
@@ -144,7 +145,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         output_dir = Path(output_dir)
         output_dir.mkdir(exist_ok=True, parents=True)
         # noinspection PyTypeChecker
-        mesh = trimesh.load(Path(self.raw_dir, "_".join(name.split('_')[:-2])) / self.target_name, force='mesh', process=False)
+        mesh = trimesh.load(Path(self.raw_dir, name) / self.target_name, force='mesh', process=False)
         mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, face_colors=prediction + 0.5, process=False)
         mesh.export(output_dir / f"{name}_{output_suffix}.obj")
 
@@ -160,23 +161,6 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     @staticmethod
     def batch_mask(t, graph_data, idx, level=0):
         return t[graph_data['level_masks'][level] == idx]
-
-    def setup_cube_texture_fast_visualization_buffers(self):
-        # noinspection PyTypeChecker
-        mesh = trimesh.load(self.mesh_directory / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
-        vertex_to_uv = np.array(mesh.visual.uv)
-        faces_to_vertices = np.array(mesh.faces)
-        a = vertex_to_uv[faces_to_vertices[:, 0], :]
-        b = vertex_to_uv[faces_to_vertices[:, 1], :]
-        c = vertex_to_uv[faces_to_vertices[:, 2], :]
-        d = vertex_to_uv[faces_to_vertices[:, 3], :]
-        self.faces_to_uv = (a + b + c + d) / 4
-        for v_idx in range(self.faces_to_uv.shape[0]):
-            j = int(round(self.faces_to_uv[v_idx][0] * (self.mesh_resolution - 1)))
-            i = (self.mesh_resolution - 1) - int(round(self.faces_to_uv[v_idx][1] * (self.mesh_resolution - 1)))
-            self.indices_dest_i.append(i)
-            self.indices_dest_j.append(j)
-            self.indices_src.append(v_idx)
 
 
 class GraphDataLoader(torch.utils.data.DataLoader):

@@ -39,7 +39,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.train_set = FaceGraphMeshDataset(config)
         self.val_set = FaceGraphMeshDataset(config, config.num_eval_images)
         self.grid_z = torch.randn(config.num_eval_images, self.config.latent_dim)
-        self.eval_graph_data = next(iter(GraphDataLoader(self.train_set, batch_size=config.batch_size)))['graph_data']
+        self.eval_batch = next(iter(GraphDataLoader(self.train_set, batch_size=config.batch_size)))
         self.automatic_optimization = False
         self.path_length_penalty = PathLengthPenalty(0.01, 2)
         self.ema = None
@@ -61,7 +61,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         fake, w = self.forward(batch)
         p_fake = self.D(self.augment_pipe(self.render(fake, batch)))
         gen_loss = torch.nn.functional.softplus(-p_fake).mean()
-        gen_loss.backward()
+        self.manual_backward(gen_loss)
         log_gen_loss = gen_loss.item()
         g_opt.step()
         self.log("G", log_gen_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True, sync_dist=True)
@@ -74,7 +74,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         if not torch.isnan(plp):
             gen_loss = self.config.lambda_plp * plp * self.config.lazy_path_penalty_interval
             self.log("rPLP", plp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
-            gen_loss.backward()
+            self.manual_backward(gen_loss)
             g_opt.step()
 
     def d_step(self, batch):
@@ -84,14 +84,14 @@ class StyleGAN2Trainer(pl.LightningModule):
         fake, _ = self.forward(batch)
         p_fake = self.D(self.augment_pipe(self.render(fake.detach(), batch)))
         fake_loss = torch.nn.functional.softplus(p_fake).mean()
-        fake_loss.backward()
+        self.manual_backward(fake_loss)
 
         p_real = self.D(self.augment_pipe(self.render(batch["y"], batch)))
         self.augment_pipe.accumulate_real_sign(p_real.sign().detach())
 
         # Get discriminator loss
         real_loss = torch.nn.functional.softplus(-p_real).mean()
-        real_loss.backward()
+        self.manual_backward(real_loss)
 
         d_opt.step()
 
@@ -108,7 +108,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         p_real = self.D(self.augment_pipe(image, True))
         gp = compute_gradient_penalty(image, p_real)
         disc_loss = self.config.lambda_gp * gp * self.config.lazy_gradient_penalty_interval
-        disc_loss.backward()
+        self.manual_backward(disc_loss)
         d_opt.step()
         self.log("rGP", gp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
 
@@ -146,12 +146,12 @@ class StyleGAN2Trainer(pl.LightningModule):
 
     @rank_zero_only
     def validation_epoch_end(self, _val_step_outputs):
-        with Timer("export_textures"):
-            odir_real, odir_fake, odir_samples, odir_textures = self.create_directories()
-            self.export_textures("", odir_textures, None)
+        with Timer("export_grid"):
+            odir_real, odir_fake, odir_samples, odir_grid = self.create_directories()
+            self.export_grid("", odir_grid, None)
             self.ema.store(self.G.parameters())
             self.ema.copy_to([p for p in self.G.parameters() if p.requires_grad])
-            self.export_textures("ema_", odir_textures, odir_fake)
+            self.export_grid("ema_", odir_grid, odir_fake)
             self.ema.restore([p for p in self.G.parameters() if p.requires_grad])
             latents = self.grid_z.split(self.config.batch_size)
         with Timer("export_samples"):
@@ -161,9 +161,8 @@ class StyleGAN2Trainer(pl.LightningModule):
                 fake_render = self.render(self.G(batch['graph_data'], latents[iter_idx].to(self.device), noise_mode='const'), batch).cpu()
                 save_image(real_render, odir_samples / f"real_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 save_image(fake_render, odir_samples / f"fake_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
-                texture = self.get_face_colors_as_texture_maps(batch['y']).cpu()
-                for batch_idx in range(texture.shape[0]):
-                    save_image(texture[batch_idx], odir_real / f"{iter_idx}_{batch_idx}.jpg", value_range=(-1, 1), normalize=True)
+                for batch_idx in range(real_render.shape[0]):
+                    save_image(real_render[batch_idx], odir_real / f"{iter_idx}_{batch_idx}.jpg", value_range=(-1, 1), normalize=True)
         fid_score = fid.compute_fid(odir_real, odir_fake, device=self.device)
         kid_score = fid.compute_kid(odir_real, odir_fake, device=self.device)
         self.log(f"fid", fid_score, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True, sync_dist=True)
@@ -193,18 +192,17 @@ class StyleGAN2Trainer(pl.LightningModule):
     def val_dataloader(self):
         return GraphDataLoader(self.val_set, self.config.batch_size, shuffle=True, drop_last=True, num_workers=self.config.num_workers)
 
-    def export_textures(self, prefix, output_dir_vis, output_dir_fid):
+    def export_grid(self, prefix, output_dir_vis, output_dir_fid):
         vis_generated_images = []
         for iter_idx, latent in enumerate(self.grid_z.split(self.config.batch_size)):
             latent = latent.to(self.device)
-            graph_data = to_device_graph_data(self.eval_graph_data, self.device)
-            fake = self.G(graph_data, latent, noise_mode='const')
-            fake_texture = self.get_face_colors_as_texture_maps(fake).cpu()
+            eval_batch = to_device(self.eval_batch, self.device)
+            fake = self.render(self.G(eval_batch['graph_data'], latent, noise_mode='const'), eval_batch).cpu()
             if output_dir_fid is not None:
-                for batch_idx in range(fake_texture.shape[0]):
-                    save_image(fake_texture[batch_idx], output_dir_fid / f"{iter_idx}_{batch_idx}.jpg", value_range=(-1, 1), normalize=True)
+                for batch_idx in range(fake.shape[0]):
+                    save_image(fake[batch_idx], output_dir_fid / f"{iter_idx}_{batch_idx}.jpg", value_range=(-1, 1), normalize=True)
             if iter_idx < self.config.num_vis_images // self.config.batch_size:
-                vis_generated_images.append(fake_texture)
+                vis_generated_images.append(fake)
         torch.cuda.empty_cache()
         vis_generated_images = torch.cat(vis_generated_images, dim=0)
         save_image(vis_generated_images, output_dir_vis / f"{prefix}{self.global_step:06d}.png", nrow=int(math.sqrt(vis_generated_images.shape[0])), value_range=(-1, 1), normalize=True)

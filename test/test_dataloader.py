@@ -23,8 +23,9 @@ def test_dataloader(config):
         x_1 = pool(x_0, batch['graph_data']['node_counts'][1], batch['graph_data']['pool_maps'][1])
         x_1 = unpool(x_1, batch['graph_data']['pool_maps'][1])
         x_0 = unpool(x_1, batch['graph_data']['pool_maps'][0])
-        save_image(dataset.to_image(batch["y"], batch["graph_data"]["level_masks"][0]), "test_target.png", nrow=4, value_range=(-1, 1), normalize=True)
-        save_image(dataset.to_image(x_0, batch["graph_data"]["level_masks"][0]), "test_pooled.png", nrow=4, value_range=(-1, 1), normalize=True)
+        # works only if uv's are present
+        # save_image(dataset.to_image(batch["y"], batch["graph_data"]["level_masks"][0]), "test_target.png", nrow=4, value_range=(-1, 1), normalize=True)
+        # save_image(dataset.to_image(x_0, batch["graph_data"]["level_masks"][0]), "test_pooled.png", nrow=4, value_range=(-1, 1), normalize=True)
         break
 
 
