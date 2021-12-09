@@ -3,7 +3,7 @@ from torchvision.utils import save_image
 from tqdm import tqdm
 import torch
 
-from dataset.mesh import FaceGraphMeshDataset, GraphDataLoader, to_device, to_vertex_colors_scatter
+from dataset.mesh_uniform import FaceGraphMeshDataset, GraphDataLoader, to_device, to_vertex_colors_scatter
 from model.differentiable_renderer import DifferentiableRenderer
 from model.graph import pool, unpool
 

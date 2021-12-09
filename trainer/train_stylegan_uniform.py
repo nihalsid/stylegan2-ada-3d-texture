@@ -10,7 +10,8 @@ from torch_ema import ExponentialMovingAverage
 from torchvision.utils import save_image
 from cleanfid import fid
 
-from dataset.mesh import FaceGraphMeshDataset, to_vertex_colors_scatter, GraphDataLoader, to_device_graph_data, to_device
+from dataset.mesh_uniform import FaceGraphMeshDataset
+from dataset import to_vertex_colors_scatter, GraphDataLoader, to_device
 from model.augment import AugmentPipe
 from model.differentiable_renderer import DifferentiableRenderer
 from model.graph_generator import Generator

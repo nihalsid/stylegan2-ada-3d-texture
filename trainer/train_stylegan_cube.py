@@ -11,7 +11,7 @@ from torchvision.utils import save_image
 from cleanfid import fid
 
 from dataset.mesh_cube import FaceGraphMeshDataset
-from dataset.mesh import to_vertex_colors_scatter, GraphDataLoader, to_device_graph_data, to_device
+from dataset import to_vertex_colors_scatter, GraphDataLoader, to_device, to_device_graph_data
 from model.augment import AugmentPipe
 from model.differentiable_renderer import DifferentiableRenderer
 from model.graph_generator import Generator
