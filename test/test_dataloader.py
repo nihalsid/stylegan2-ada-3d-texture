@@ -11,11 +11,12 @@ from model.graph import pool, unpool
 @hydra.main(config_path='../config', config_name='stylegan2')
 def test_dataloader(config):
     dataset = FaceGraphMeshDataset(config)
-    dataloader = GraphDataLoader(dataset, batch_size=8, num_workers=0)
+    dataloader = GraphDataLoader(dataset, batch_size=1, num_workers=0)
     render_helper = DifferentiableRenderer(128).cuda()
     for batch_idx, batch in enumerate(tqdm(dataloader)):
         # sanity test render + target colors
         batch = to_device(batch, torch.device("cuda:0"))
+        print(batch['name'])
         rendered_color_gt = render_helper.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(batch["y"], batch), batch["ranges"].cpu())
         save_image(rendered_color_gt.permute((0, 3, 1, 2)), "test_dataloader.png", nrow=4, value_range=(-1, 1), normalize=True)
         # sanity test graph counts and pool maps
@@ -26,7 +27,7 @@ def test_dataloader(config):
         # works only if uv's are present
         # save_image(dataset.to_image(batch["y"], batch["graph_data"]["level_masks"][0]), "test_target.png", nrow=4, value_range=(-1, 1), normalize=True)
         # save_image(dataset.to_image(x_0, batch["graph_data"]["level_masks"][0]), "test_pooled.png", nrow=4, value_range=(-1, 1), normalize=True)
-        break
+        # break
 
 
 if __name__ == '__main__':

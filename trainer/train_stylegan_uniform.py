@@ -63,7 +63,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         gen_loss = torch.nn.functional.softplus(-p_fake).mean()
         self.manual_backward(gen_loss)
         log_gen_loss = gen_loss.item()
-        g_opt.step()
+        step(g_opt, self.G)
         self.log("G", log_gen_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True, sync_dist=True)
 
     def g_regularizer(self, batch):
@@ -75,7 +75,7 @@ class StyleGAN2Trainer(pl.LightningModule):
             gen_loss = self.config.lambda_plp * plp * self.config.lazy_path_penalty_interval
             self.log("rPLP", plp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
             self.manual_backward(gen_loss)
-            g_opt.step()
+            step(g_opt, self.G)
 
     def d_step(self, batch):
         d_opt = self.optimizers()[1]
@@ -93,7 +93,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         real_loss = torch.nn.functional.softplus(-p_real).mean()
         self.manual_backward(real_loss)
 
-        d_opt.step()
+        step(d_opt, self.D)
 
         self.log("D_real", real_loss, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
         self.log("D_fake", fake_loss, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
@@ -109,7 +109,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         gp = compute_gradient_penalty(image, p_real)
         disc_loss = self.config.lambda_gp * gp * self.config.lazy_gradient_penalty_interval
         self.manual_backward(disc_loss)
-        d_opt.step()
+        step(d_opt, self.D)
         self.log("rGP", gp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
 
     def render(self, face_colors, batch):
@@ -153,12 +153,12 @@ class StyleGAN2Trainer(pl.LightningModule):
             self.ema.copy_to([p for p in self.G.parameters() if p.requires_grad])
             self.export_grid("ema_", odir_grid, odir_fake)
             self.ema.restore([p for p in self.G.parameters() if p.requires_grad])
-            latents = self.grid_z.split(self.config.batch_size)
         with Timer("export_samples"):
+            latents = self.grid_z.split(self.config.batch_size)
             for iter_idx, batch in enumerate(self.val_dataloader()):
                 batch = to_device(batch, self.device)
                 real_render = self.render(batch['y'], batch).cpu()
-                fake_render = self.render(self.G(batch['graph_data'], latents[iter_idx].to(self.device), noise_mode='const'), batch).cpu()
+                fake_render = self.render(self.G(batch['graph_data'], latents[iter_idx % len(latents)].to(self.device), noise_mode='const'), batch).cpu()
                 save_image(real_render, odir_samples / f"real_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 save_image(fake_render, odir_samples / f"fake_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 for batch_idx in range(real_render.shape[0]):
@@ -237,6 +237,13 @@ class StyleGAN2Trainer(pl.LightningModule):
             self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
         if self.R is None:
             self.R = DifferentiableRenderer(self.config.image_size)
+
+
+def step(opt, module):
+    for param in module.parameters():
+        if param.grad is not None:
+            torch.nan_to_num(param.grad, nan=0, posinf=1e5, neginf=-1e5, out=param.grad)
+    opt.step()
 
 
 @hydra.main(config_path='../config', config_name='stylegan2')
