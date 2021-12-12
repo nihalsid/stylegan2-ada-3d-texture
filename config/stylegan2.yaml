@@ -10,6 +10,8 @@
 
 dataset_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold_processed
 mesh_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold
+pairmeta_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/metadata/pairs.json
+image_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars
 mesh_resolution: 64
 
 experiment: fast_dev
@@ -52,6 +54,8 @@ num_workers: 8
 
 wandb_main: False
 suffix: ''
+
+preload: True
 
 hydra:
   output_subdir: null # Disable saving of config files. We'll do that ourselves.

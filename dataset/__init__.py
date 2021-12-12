@@ -5,6 +5,7 @@ from torch.utils.data.dataloader import default_collate
 from torch_geometric.data import Dataset
 from collections.abc import Mapping, Sequence
 
+from model.differentiable_renderer import transform_pos_mvp
 from util.misc import EasyDict
 
 
@@ -220,6 +221,8 @@ class Collater(object):
                             vertex_counts.append(batch[b_i]['vertex_ctr'] + num_vertex)
                         num_vertex += batch[b_i]['vertices'].shape[0]
                     retdict[key] = self.cat_collate(vertex_counts)
+                elif key == 'real':
+                    retdict[key] = self.cat_collate([d[key] for d in batch])
                 else:
                     retdict[key] = self.collate([d[key] for d in batch])
             return retdict

@@ -33,8 +33,6 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.mesh_directory = Path(config.mesh_path)
         self.items = list(x.stem for x in Path(config.dataset_path).iterdir())[:limit_dataset_size]
         self.target_name = "model_normalized.obj"
-        self.mask = lambda x, bs: torch.ones((x.shape[0],)).float().to(x.device)
-        self.indices_src, self.indices_dest_i, self.indices_dest_j, self.faces_to_uv = [], [], [], None
         self.projection_matrix = intrinsic_to_projection(get_default_perspective_cam()).float()
         self.generate_camera = generate_random_camera
         self.views_per_sample = config.views_per_sample
@@ -96,15 +94,6 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         mesh = trimesh.load(Path(self.raw_dir, name) / self.target_name, force='mesh', process=False)
         mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, face_colors=prediction + 0.5, process=False)
         mesh.export(output_dir / f"{name}_{output_suffix}.obj")
-
-    def to_image(self, face_colors, level_mask):
-        batch_size = level_mask.max() + 1
-        image = torch.zeros((batch_size, 3, self.mesh_resolution, self.mesh_resolution), device=face_colors.device)
-        indices_dest_i = torch.tensor(self.indices_dest_i * batch_size, device=face_colors.device).long()
-        indices_dest_j = torch.tensor(self.indices_dest_j * batch_size, device=face_colors.device).long()
-        indices_src = torch.tensor(self.indices_src * batch_size, device=face_colors.device).long()
-        image[level_mask, :, indices_dest_i, indices_dest_j] = face_colors[indices_src + level_mask * len(self.indices_src), :]
-        return image
 
     @staticmethod
     def batch_mask(t, graph_data, idx, level=0):
