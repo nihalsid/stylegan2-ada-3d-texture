@@ -16,10 +16,8 @@ class AutoencoderTrainer(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters(config)
         self.config = config
-        self.train_data = DistanceFieldDataset(config)
-        self.val_data = DistanceFieldDataset(config, 1024)
-        # self.train_data = DistanceFieldDataset(config, 2, overfit=True)
-        # self.val_data = DistanceFieldDataset(config, 2)
+        self.train_data = DistanceFieldDataset(config, interval=[0, -1024])
+        self.val_data = DistanceFieldDataset(config, interval=[-1024, None])
         self.num_vis_samples = 48
         self.model = AutoEncoder32()
         self.metrics = torch.nn.ModuleList([IoU(compute_on_step=False), Chamfer3D(compute_on_step=False),

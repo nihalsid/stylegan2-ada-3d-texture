@@ -8,8 +8,8 @@ import hydra
 
 class DistanceFieldDataset(torch.utils.data.Dataset):
     
-    def __init__(self, config, limit=None, overfit=False):
-        self.items = [x / "032.npy" for x in Path(config.df_path).iterdir()][:limit]
+    def __init__(self, config, interval, overfit=False):
+        self.items = [x / "032.npy" for x in sorted(list(Path(config.df_path).iterdir()))][interval[0]: interval[1]]
         if overfit:
             self.items = self.items * 160
         self.trunc = config.df_trunc
