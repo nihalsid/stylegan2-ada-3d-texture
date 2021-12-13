@@ -1,19 +1,14 @@
-import math
 import os
 import random
 from collections import defaultdict
 from pathlib import Path
 
-import numpy as np
 import torch
 import trimesh
-from scipy.spatial.transform import Rotation
 from torchvision.io import read_image
 from tqdm import tqdm
 import json
 
-from dataset import get_default_perspective_cam
-from model.differentiable_renderer import intrinsic_to_projection
 from util.camera import spherical_coord_to_cam
 from util.misc import EasyDict
 import torchvision.transforms as T
@@ -28,7 +23,6 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.real_images = {x.name.split('.')[0]: x for x in Path(config.image_path).iterdir() if x.name.endswith('.jpg') or x.name.endswith('.png')}
         self.items = list(x.stem for x in Path(config.dataset_path).iterdir())[:limit_dataset_size]
         self.target_name = "model_normalized.obj"
-        self.generate_camera = generate_random_camera
         self.views_per_sample = config.views_per_sample
         self.pair_meta = self.load_pair_meta(config.pairmeta_path)
         self.real_images_preloaded = {}
