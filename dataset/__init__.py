@@ -28,13 +28,14 @@ def to_device(batch, device):
     for k in batch.keys():
         if isinstance(batch[k], torch.Tensor):
             batch[k] = batch[k].to(device)
-    for k in batch['graph_data'].keys():
-        if isinstance(batch['graph_data'][k], torch.Tensor):
-            batch['graph_data'][k] = batch['graph_data'][k].to(device)
-        elif isinstance(batch['graph_data'][k], list):
-            for m in range(len(batch['graph_data'][k])):
-                if isinstance(batch['graph_data'][k][m], torch.Tensor):
-                    batch['graph_data'][k][m] = batch['graph_data'][k][m].to(device)
+    if 'graph_data' in batch:
+        for k in batch['graph_data'].keys():
+            if isinstance(batch['graph_data'][k], torch.Tensor):
+                batch['graph_data'][k] = batch['graph_data'][k].to(device)
+            elif isinstance(batch['graph_data'][k], list):
+                for m in range(len(batch['graph_data'][k])):
+                    if isinstance(batch['graph_data'][k][m], torch.Tensor):
+                        batch['graph_data'][k][m] = batch['graph_data'][k][m].to(device)
     return batch
 
 

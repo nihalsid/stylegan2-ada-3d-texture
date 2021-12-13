@@ -1,0 +1,3 @@
+[submodule "external/ChamferDistancePytorch"]
+	path = external/ChamferDistancePytorch
+	url = git@github.com:nihalsid/ChamferDistancePytorch.git

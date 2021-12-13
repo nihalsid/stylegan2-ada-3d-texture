@@ -1,5 +1,6 @@
 import torch
 from ballpark import business
+import numpy as np
 
 
 def print_model_parameter_count(model):
@@ -95,3 +96,7 @@ class EasyDict(dict):
 
     def __delattr__(self, name):
         del self[name]
+
+
+def to_point_list(s):
+    return np.concatenate([c[:, np.newaxis] for c in np.where(s)], axis=1)

@@ -11,6 +11,7 @@
 dataset_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold_processed
 mesh_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold
 pairmeta_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/metadata/pairs.json
+df_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/shapenet-chairs-manifold
 image_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars
 mesh_resolution: 64
 
@@ -51,6 +52,11 @@ num_vis_images: 1024
 batch_size: 16
 views_per_sample: 2
 num_workers: 8
+
+df_trunc: 0.3125
+df_size: 0.0625
+df_mean: 0.2839
+df_std: 0.0686
 
 wandb_main: False
 suffix: ''

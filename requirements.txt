@@ -17,3 +17,5 @@ nvdiffrast
 pyrender
 trimesh
 scipy
+setuptools
+matplotlib
