@@ -31,8 +31,8 @@ class StyleGAN2Trainer(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters(config)
         self.config = config
-        self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3)
-        self.D = Discriminator(config.image_size, 3)
+        self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, c_dim=config.condition_dim)
+        self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, c_dim=config.condition_dim)
         self.R = None
         self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size)
         # print_module_summary(self.G, (torch.zeros(self.config.batch_size, self.config.latent_dim), ))
@@ -52,7 +52,7 @@ class StyleGAN2Trainer(pl.LightningModule):
 
     def forward(self, batch, limit_batch_size=False):
         z = self.latent(limit_batch_size)
-        w = self.get_mapped_latent(z, 0.9)
+        w = self.get_mapped_latent(z, batch['condition'], 0.9)
         fake = self.G.synthesis(batch['graph_data'], w)
         return fake, w
 
@@ -60,7 +60,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         g_opt = self.optimizers()[0]
         g_opt.zero_grad(set_to_none=True)
         fake, w = self.forward(batch)
-        p_fake = self.D(self.augment_pipe(self.render(fake, batch)))
+        p_fake = self.D(self.augment_pipe(self.render(fake, batch)), batch['condition'])
         gen_loss = torch.nn.functional.softplus(-p_fake).mean()
         self.manual_backward(gen_loss)
         log_gen_loss = gen_loss.item()
@@ -83,11 +83,11 @@ class StyleGAN2Trainer(pl.LightningModule):
         d_opt.zero_grad(set_to_none=True)
 
         fake, _ = self.forward(batch)
-        p_fake = self.D(self.augment_pipe(self.render(fake.detach(), batch)))
+        p_fake = self.D(self.augment_pipe(self.render(fake.detach(), batch)), batch['condition'])
         fake_loss = torch.nn.functional.softplus(p_fake).mean()
         self.manual_backward(fake_loss)
 
-        p_real = self.D(self.augment_pipe(batch['real']))
+        p_real = self.D(self.augment_pipe(batch['real']), batch['condition'])
         self.augment_pipe.accumulate_real_sign(p_real.sign().detach())
 
         # Get discriminator loss
@@ -106,7 +106,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         d_opt.zero_grad(set_to_none=True)
         image = batch['real']
         image.requires_grad_()
-        p_real = self.D(self.augment_pipe(image, True))
+        p_real = self.D(self.augment_pipe(image, True), batch['condition'])
         gp = compute_gradient_penalty(image, p_real)
         disc_loss = self.config.lambda_gp * gp * self.config.lazy_gradient_penalty_interval
         self.manual_backward(disc_loss)
@@ -158,8 +158,11 @@ class StyleGAN2Trainer(pl.LightningModule):
             latents = self.grid_z.split(self.config.batch_size)
             for iter_idx, batch in enumerate(self.val_dataloader()):
                 batch = to_device(batch, self.device)
+                condition = batch['condition']
+                if condition is not None:
+                    condition = condition.to(self.device)
                 real_render = batch['real'].cpu()
-                fake_render = self.render(self.G(batch['graph_data'], latents[iter_idx % len(latents)].to(self.device), noise_mode='const'), batch).cpu()
+                fake_render = self.render(self.G(batch['graph_data'], latents[iter_idx % len(latents)].to(self.device), condition, noise_mode='const'), batch).cpu()
                 save_image(real_render, odir_samples / f"real_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 save_image(fake_render, odir_samples / f"fake_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 for batch_idx in range(real_render.shape[0]):
@@ -171,14 +174,14 @@ class StyleGAN2Trainer(pl.LightningModule):
         print(f'FID: {fid_score:.3f} , KID: {kid_score:.3f}')
         shutil.rmtree(odir_real.parent)
 
-    def get_mapped_latent(self, z, style_mixing_prob):
+    def get_mapped_latent(self, z, c, style_mixing_prob):
         if torch.rand(()).item() < style_mixing_prob:
             cross_over_point = int(torch.rand(()).item() * self.G.mapping.num_ws)
-            w1 = self.G.mapping(z[0])[:, :cross_over_point, :]
-            w2 = self.G.mapping(z[1], skip_w_avg_update=True)[:, cross_over_point:, :]
+            w1 = self.G.mapping(z[0], c)[:, :cross_over_point, :]
+            w2 = self.G.mapping(z[1], c, skip_w_avg_update=True)[:, cross_over_point:, :]
             return torch.cat((w1, w2), dim=1)
         else:
-            w = self.G.mapping(z[0])
+            w = self.G.mapping(z[0], c)
             return w
 
     def latent(self, limit_batch_size=False):
@@ -196,10 +199,10 @@ class StyleGAN2Trainer(pl.LightningModule):
     def export_grid(self, prefix, output_dir_vis, output_dir_fid):
         vis_generated_images = []
         grid_loader = iter(GraphDataLoader(self.train_set, batch_size=self.config.batch_size))
-        for iter_idx, latent in enumerate(self.grid_z.split(self.config.batch_size)):
-            latent = latent.to(self.device)
+        for iter_idx, z in enumerate(self.grid_z.split(self.config.batch_size)):
+            z = z.to(self.device)
             eval_batch = to_device(next(grid_loader), self.device)
-            fake = self.render(self.G(eval_batch['graph_data'], latent, noise_mode='const'), eval_batch).cpu()
+            fake = self.render(self.G(eval_batch['graph_data'], z, eval_batch['condition'], noise_mode='const'), eval_batch).cpu()
             if output_dir_fid is not None:
                 for batch_idx in range(fake.shape[0]):
                     save_image(fake[batch_idx], output_dir_fid / f"{iter_idx}_{batch_idx}.jpg", value_range=(-1, 1), normalize=True)

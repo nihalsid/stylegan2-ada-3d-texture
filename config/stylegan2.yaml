@@ -13,6 +13,8 @@ mesh_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manif
 pairmeta_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/metadata/pairs.json
 df_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/shapenet-chairs-manifold
 image_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars
+condition_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold_autoencoder
+
 mesh_resolution: 64
 
 experiment: fast_dev
@@ -26,14 +28,13 @@ val_check_interval: 1
 resume: null
 
 num_mapping_layers: 2
-#lr_g: 0.0002
-#lr_d: 0.000235
 lr_g: 0.002
 lr_d: 0.00235
 lazy_gradient_penalty_interval: 16
 lazy_path_penalty_after: 0
 lazy_path_penalty_interval: 4
 latent_dim: 512
+condition_dim: 512
 lambda_gp: 1
 lambda_plp: 2
 ada_start_p: 0.  #to disable set to -1

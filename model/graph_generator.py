@@ -6,18 +6,19 @@ from model.graph import create_faceconv_input, SmoothUpsample, modulated_face_co
 
 class Generator(torch.nn.Module):
 
-    def __init__(self, z_dim, w_dim, w_num_layers, num_faces, color_channels):
+    def __init__(self, z_dim, w_dim, w_num_layers, num_faces, color_channels, c_dim=0):
         super().__init__()
         self.z_dim = z_dim
         self.w_dim = w_dim
+        self.c_dim = c_dim
         self.num_faces = num_faces
         self.color_channels = color_channels
         self.synthesis = SynthesisNetwork(w_dim=w_dim, num_faces=num_faces, color_channels=color_channels)
         self.num_ws = self.synthesis.num_ws
-        self.mapping = MappingNetwork(z_dim=z_dim, w_dim=w_dim, num_ws=self.num_ws, num_layers=w_num_layers)
+        self.mapping = MappingNetwork(z_dim=z_dim, w_dim=w_dim, c_dim=c_dim, num_ws=self.num_ws, num_layers=w_num_layers)
 
-    def forward(self, graph_data, z, truncation_psi=1, truncation_cutoff=None, noise_mode='random'):
-        ws = self.mapping(z, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff)
+    def forward(self, graph_data, z, c=None, truncation_psi=1, truncation_cutoff=None, noise_mode='random'):
+        ws = self.mapping(z, c, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff)
         img = self.synthesis(graph_data, ws, noise_mode)
         return img
 
@@ -26,16 +27,16 @@ class SynthesisNetwork(torch.nn.Module):
 
     def __init__(self, w_dim, num_faces, color_channels, channel_base=16384, channel_max=512):
         super().__init__()
-        self.num_ws = 10
         self.w_dim = w_dim
         self.num_faces = num_faces
         self.color_channels = color_channels
-        block_pow_2 = [2 ** i for i in range(2, len(self.num_faces) + 2)]
-        channels_dict = {res: min(channel_base // res, channel_max) for res in block_pow_2}
+        self.block_pow_2 = [2 ** i for i in range(2, len(self.num_faces) + 2)]
+        channels_dict = {res: min(channel_base // res, channel_max) for res in self.block_pow_2}
         self.blocks = torch.nn.ModuleList()
-        block_level = len(block_pow_2) - 1
-        self.first_block = SynthesisPrologue(channels_dict[block_pow_2[0]], w_dim=w_dim, num_face=num_faces[block_level], color_channels=color_channels)
-        for cdict_key in block_pow_2[1:]:
+        block_level = len(self.block_pow_2) - 1
+        self.num_ws = 2 * len(self.block_pow_2)
+        self.first_block = SynthesisPrologue(channels_dict[self.block_pow_2[0]], w_dim=w_dim, num_face=num_faces[block_level], color_channels=color_channels)
+        for cdict_key in self.block_pow_2[1:]:
             block_level -= 1
             in_channels = channels_dict[cdict_key // 2]
             out_channels = channels_dict[cdict_key]
@@ -45,7 +46,7 @@ class SynthesisNetwork(torch.nn.Module):
             self.blocks.append(block)
 
     def forward(self, graph_data, ws, noise_mode='random'):
-        split_ws = [ws[:, 0:2, :], ws[:, 1:4, :], ws[:, 3:6, :], ws[:, 5:8, :], ws[:, 7:10, :]]
+        split_ws = [ws[:, 0:2, :]] + [ws[:, 2 * n + 1: 2 * n + 4, :] for n in range(len(self.block_pow_2) - 1)]
         neighborhoods = [graph_data['face_neighborhood']] + graph_data['sub_neighborhoods']
         appended_pool_maps = [None] + graph_data['pool_maps']
         block_level = len(self.num_faces) - 1
@@ -168,15 +169,19 @@ class SynthesisLayer(torch.nn.Module):
 
 class MappingNetwork(torch.nn.Module):
 
-    def __init__(self, z_dim, w_dim, num_ws, num_layers=8, activation='lrelu', lr_multiplier=0.01, w_avg_beta=0.995):
+    def __init__(self, z_dim, w_dim, c_dim, num_ws, num_layers=8, activation='lrelu', lr_multiplier=0.01, w_avg_beta=0.995):
         super().__init__()
         self.z_dim = z_dim
         self.w_dim = w_dim
+        self.c_dim = c_dim
         self.num_ws = num_ws
         self.num_layers = num_layers
         self.w_avg_beta = w_avg_beta
 
-        features_list = [z_dim] + [w_dim] * num_layers
+        features_list = [z_dim + c_dim] + [w_dim] * num_layers
+
+        if c_dim > 0:
+            self.embed = FullyConnectedLayer(c_dim, w_dim)
 
         self.layers = torch.nn.ModuleList()
         for idx in range(num_layers):
@@ -187,9 +192,13 @@ class MappingNetwork(torch.nn.Module):
         if num_ws is not None and w_avg_beta is not None:
             self.register_buffer('w_avg', torch.zeros([w_dim]))
 
-    def forward(self, z, truncation_psi=1, truncation_cutoff=None, skip_w_avg_update=False):
+    def forward(self, z, c=None, truncation_psi=1, truncation_cutoff=None, skip_w_avg_update=False):
         # Embed, normalize, and concat inputs.
         x = normalize_2nd_moment(z)
+
+        if self.c_dim > 0:
+            y = normalize_2nd_moment(self.embed(c))
+            x = torch.cat([x, y], dim=1)
 
         # Main layers.
         for idx in range(self.num_layers):

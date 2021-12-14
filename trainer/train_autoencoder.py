@@ -5,7 +5,7 @@ import numpy as np
 import hydra
 import pytorch_lightning as pl
 from pytorch_lightning.utilities import rank_zero_only
-from dataset.distancefield import DistanceFieldDataset
+from dataset.distance_field import DistanceFieldDataset
 from model.autoencoder import AutoEncoder32
 from trainer import create_trainer
 from util.df_metrics import IoU, Chamfer3D, Precision, Recall

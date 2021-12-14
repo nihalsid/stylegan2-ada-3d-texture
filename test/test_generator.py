@@ -2,7 +2,9 @@ import time
 import torch
 from tqdm import tqdm
 import hydra
-from dataset.mesh_uniform import to_device, GraphDataLoader, FaceGraphMeshDataset
+
+from dataset import GraphDataLoader, to_device
+from dataset.mesh_uniform import FaceGraphMeshDataset
 from model import modulated_conv2d
 from model.graph_generator import Generator
 from model.graph import modulated_face_conv
