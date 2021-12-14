@@ -11,6 +11,7 @@ class Discriminator(torch.nn.Module):
         self.img_resolution = img_resolution
         self.img_resolution_log2 = int(np.log2(img_resolution))
         self.img_channels = img_channels
+        self.c_dim = c_dim
         self.block_resolutions = [2 ** i for i in range(self.img_resolution_log2, 2, -1)]
         channels_dict = {res: min(channel_base // res, channel_max) for res in self.block_resolutions + [4]}
         self.module_list = [EqualizedConv2d(img_channels, channels_dict[img_resolution], kernel_size=1, activation='lrelu')]
@@ -19,12 +20,13 @@ class Discriminator(torch.nn.Module):
             out_channels = channels_dict[res // 2]
             self.module_list.append(DiscriminatorBlock(in_channels, out_channels))
         self.module_list.append(DiscriminatorEpilogue(channels_dict[4], resolution=4, cmap_dim=channels_dict[4]))
+        self.module_list = torch.nn.ModuleList(self.module_list)
         if c_dim > 0:
             self.mapping = DiscriminatorMappingNetwork(c_dim=c_dim, cmap_dim=channels_dict[4], num_layers=w_num_layers)
 
     def forward(self, x, c=None):
         if self.c_dim > 0:
-            c = self.mapping(None, c)
+            c = self.mapping(c)
         for net in self.module_list[:-1]:
             x = net(x)
         x = self.module_list[-1](x, c)

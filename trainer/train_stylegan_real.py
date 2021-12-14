@@ -60,7 +60,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         g_opt = self.optimizers()[0]
         g_opt.zero_grad(set_to_none=True)
         fake, w = self.forward(batch)
-        p_fake = self.D(self.augment_pipe(self.render(fake, batch)), batch['condition'])
+        p_fake = self.D(self.augment_pipe(self.render(fake, batch)), self.to_D_condition(batch['condition']))
         gen_loss = torch.nn.functional.softplus(-p_fake).mean()
         self.manual_backward(gen_loss)
         log_gen_loss = gen_loss.item()
@@ -83,11 +83,11 @@ class StyleGAN2Trainer(pl.LightningModule):
         d_opt.zero_grad(set_to_none=True)
 
         fake, _ = self.forward(batch)
-        p_fake = self.D(self.augment_pipe(self.render(fake.detach(), batch)), batch['condition'])
+        p_fake = self.D(self.augment_pipe(self.render(fake.detach(), batch)), self.to_D_condition(batch['condition']))
         fake_loss = torch.nn.functional.softplus(p_fake).mean()
         self.manual_backward(fake_loss)
 
-        p_real = self.D(self.augment_pipe(batch['real']), batch['condition'])
+        p_real = self.D(self.augment_pipe(batch['real']), self.to_D_condition(batch['condition']))
         self.augment_pipe.accumulate_real_sign(p_real.sign().detach())
 
         # Get discriminator loss
@@ -106,7 +106,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         d_opt.zero_grad(set_to_none=True)
         image = batch['real']
         image.requires_grad_()
-        p_real = self.D(self.augment_pipe(image, True), batch['condition'])
+        p_real = self.D(self.augment_pipe(image, True), self.to_D_condition(batch['condition']))
         gp = compute_gradient_penalty(image, p_real)
         disc_loss = self.config.lambda_gp * gp * self.config.lazy_gradient_penalty_interval
         self.manual_backward(disc_loss)
@@ -221,15 +221,8 @@ class StyleGAN2Trainer(pl.LightningModule):
             odir.mkdir(exist_ok=True, parents=True)
         return output_dir_fid_real, output_dir_fid_fake, output_dir_samples, output_dir_textures
 
-    def get_face_colors_as_texture_maps(self, face_colors):
-        level_mask = self.get_level_mask(face_colors)
-        face_colors_as_texture_map = self.val_set.to_image(face_colors, level_mask)
-        return face_colors_as_texture_map
-
-    def get_level_mask(self, face_colors):
-        level_mask = torch.tensor(list(range(self.config.batch_size))).long().to(face_colors.device)
-        level_mask = level_mask.unsqueeze(-1).expand(-1, face_colors.shape[0] // self.config.batch_size).reshape(-1)
-        return level_mask
+    def to_D_condition(self, condition):
+        return condition.unsqueeze(1).expand(-1, self.config.views_per_sample, -1).reshape(-1, self.config.condition_dim)
 
     def on_train_start(self):
         if self.ema is None:
