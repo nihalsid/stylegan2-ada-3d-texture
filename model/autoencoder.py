@@ -66,7 +66,7 @@ class Encoder(nn.Module):
         h = self.norm_out(h)
         h = nonlinearity(h)
         h = self.conv_out(h)
-        return h.squeeze(-1).squeeze(-1).squeeze(-1)
+        return h
 
 
 class Decoder(nn.Module):
@@ -117,7 +117,6 @@ class Decoder(nn.Module):
 
     def forward(self, z):
         # z to block_in
-        z = z.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
         h = self.conv_in(z)
 
         # middle
@@ -251,6 +250,7 @@ class Downsample(nn.Module):
 
 
 def nonlinearity(x):
+    # return torch.nn.functional.leaky_relu(x, 0.02)
     return x * torch.sigmoid(x)
 
 
@@ -262,11 +262,11 @@ class AutoEncoder32(nn.Module):
 
     def __init__(self):
         super().__init__()
-        base_ch = 16
-        ch_mult = (1, 2, 4, 8, 8, 16)
+        base_ch = 8
+        ch_mult = (1, 2, 4, 8, 8)
         num_res_blocks = 2
         attn_res = [2]
-        z_channels = 256
+        z_channels = 64
         self.encoder = Encoder(ch=base_ch, ch_mult=ch_mult, num_res_blocks=num_res_blocks, attn_resolutions=attn_res, dropout=0.0, resamp_with_conv=True, in_channels=1, resolution=32, z_channels=z_channels, double_z=False)
         self.decoder = Decoder(ch=base_ch, out_ch=1, ch_mult=ch_mult, num_res_blocks=num_res_blocks, attn_resolutions=attn_res, dropout=0.0, resamp_with_conv=True, in_channels=1, resolution=32, z_channels=z_channels)
 
