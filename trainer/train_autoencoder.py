@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import torch
+import numpy as np
 import hydra
 import pytorch_lightning as pl
 from pytorch_lightning.utilities import rank_zero_only
@@ -64,6 +65,10 @@ class AutoencoderTrainer(pl.LightningModule):
     def val_dataloader(self):
         return torch.utils.data.DataLoader(self.val_data, batch_size=self.config.batch_size, shuffle=False, pin_memory=True, drop_last=False, num_workers=self.config.num_workers)
 
+    def test_dataloader(self):
+        data = DistanceFieldDataset(self.config, interval=[0, None])
+        return torch.utils.data.DataLoader(data, batch_size=self.config.batch_size, shuffle=False, pin_memory=False, drop_last=False, num_workers=self.config.num_workers)
+
     @staticmethod
     def adjust_weights(pred_empty, batch):
         weights = batch['weights'].clone().detach()
@@ -84,12 +89,35 @@ class AutoencoderTrainer(pl.LightningModule):
         loss_l1 = torch.abs(pred_shape_df - batch['df']).mean()
         return loss_l1
 
+    def test_step(self, batch, batch_idx):
+        predicted = self.network_pred_to_df(self.forward(batch))
+        code = self.model.encoder(self.normalize_df(batch['df']))
+        b, c, d, h, w = code.shape
+        code = code.reshape(b, c * d * h * w).cpu().numpy()
+        self.record_evaluation_for_batch(predicted, batch)
+        output_dir = Path(f'runs/{self.config.experiment}/latent/{self.current_epoch:04d}')
+        output_dir.mkdir(exist_ok=True, parents=True)
+        for b in range(code.shape[0]):
+            np.save(output_dir / f'{batch["name"][b]}.npy', code[b])
+
+    def test_epoch_end(self, outputs):
+        iou, cd, precision, recall = self.metrics[0].compute(), self.metrics[1].compute(), self.metrics[2].compute(), self.metrics[3].compute()
+        print(f"\nIoU = {iou:.3f} | CD = {cd:.3f} | P = {precision:.3f} | R = {recall:.3f}")
+
 
 @hydra.main(config_path='../config', config_name='stylegan2')
 def main(config):
     trainer = create_trainer("Autoencoder32", config)
     model = AutoencoderTrainer(config)
     trainer.fit(model)
+
+
+@hydra.main(config_path='../config', config_name='stylegan2')
+def infer(config):
+    trainer = create_trainer("Autoencoder32", config)
+    model = AutoencoderTrainer(config)
+    model.load_state_dict(torch.load(config.resume)['state_dict'])
+    trainer.test(model)
 
 
 if __name__ == '__main__':
