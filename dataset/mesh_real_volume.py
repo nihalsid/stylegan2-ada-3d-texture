@@ -28,7 +28,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.views_per_sample = config.views_per_sample
         self.mean = config.df_mean
         self.std = config.df_std
-        self.all_pairs = self.load_pair_meta(config.pairmeta_path)
+        self.pair_meta, self.all_views = self.load_pair_meta(config.pairmeta_path)
         self.real_images_preloaded = {}
         if config.preload:
             self.preload_real_images()
@@ -55,7 +55,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         vctr = torch.tensor(list(range(vertices.shape[0]))).long()
         df = torch.from_numpy(np.load(str(self.df_directory / selected_item / "032.npy"))).float().unsqueeze(0)
         df = (df - self.mean) / self.std
-        real_sample, mvp = self.get_image_and_view()
+        real_sample, mvp = self.get_image_and_view(selected_item)
 
         return {
             "name": selected_item,
@@ -95,12 +95,14 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     def batch_mask(t, graph_data, idx, level=0):
         return t[graph_data['level_masks'][level] == idx]
 
-    def get_image_and_view(self):
-        random_pairs = random.sample(self.all_pairs, self.views_per_sample)
+    def get_image_and_view(self, shape):
+        shape_id = int(shape.split('_')[0].split('shape')[1])
+        image_selections = self.get_image_selections(shape_id)
+        view_selections = random.sample(self.all_views, self.views_per_sample)
         images, cameras = [], []
-        for c in random_pairs:
-            images.append(self.get_real_image(self.meta_to_pair(c)))
-            perspective_cam = spherical_coord_to_cam(c['fov'], c['azimuth'], c['elevation'])
+        for c_i, c_v in zip(image_selections, view_selections):
+            images.append(self.get_real_image(self.meta_to_pair(c_i)))
+            perspective_cam = spherical_coord_to_cam(c_v['fov'], c_v['azimuth'], c_v['elevation'])
             # projection_matrix = intrinsic_to_projection(get_default_perspective_cam()).float()
             projection_matrix = torch.from_numpy(perspective_cam.projection_mat()).float()
             # view_matrix = torch.from_numpy(np.linalg.inv(generate_camera(np.zeros(3), c['azimuth'], c['elevation']))).float()
@@ -119,6 +121,16 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         else:
             return self.real_images_preloaded[name]
 
+    def get_image_selections(self, shape_id):
+        candidates = self.pair_meta[shape_id]
+        if len(candidates) < self.views_per_sample:
+            while len(candidates) < self.views_per_sample:
+                meta = self.pair_meta[random.choice(list(self.pair_meta.keys()))]
+                candidates.extend(meta[:self.views_per_sample - len(candidates)])
+        else:
+            candidates = random.sample(candidates, self.views_per_sample)
+        return candidates
+
     def process_real_image(self, path):
         resize = T.Resize(size=(self.image_size, self.image_size))
         pad = T.Pad(padding=(100, 100), fill=1)
@@ -126,11 +138,13 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
     def load_pair_meta(self, pairmeta_path):
         loaded_json = json.loads(Path(pairmeta_path).read_text())
-        retlist = []
+        ret_dict = defaultdict(list)
+        ret_views = []
         for k in loaded_json.keys():
-            if self.meta_to_pair(loaded_json[k]) in self.real_images:
-                retlist.append(loaded_json[k])
-        return retlist
+            if self.meta_to_pair(loaded_json[k]) in self.real_images.keys():
+                ret_dict[loaded_json[k]['shape_id']].append(loaded_json[k])
+                ret_views.append(loaded_json[k])
+        return ret_dict, ret_views
 
     def preload_real_images(self):
         for ri in tqdm(self.real_images.keys(), desc='preload'):
