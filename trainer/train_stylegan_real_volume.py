@@ -74,6 +74,7 @@ class StyleGAN2Trainer(pl.LightningModule):
 
     def g_regularizer(self, batch):
         g_opt = self.optimizers()[0]
+        batch['condition'] = batch['condition'].detach()
         g_opt.zero_grad(set_to_none=True)
         fake, w = self.forward(batch)
         plp = self.path_length_penalty(self.render(fake, batch), w)
