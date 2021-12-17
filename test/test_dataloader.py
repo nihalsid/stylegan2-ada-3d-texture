@@ -67,4 +67,4 @@ def test_view_angles_real(config):
 
 
 if __name__ == '__main__':
-    test_dataloader()
+    test_view_angles_together()

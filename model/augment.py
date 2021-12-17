@@ -112,6 +112,7 @@ class AugmentPipe(torch.nn.Module):
         self.upsampler = SmoothUpsample()
         self.downsampler = SmoothDownsample()
         self.forward = self.forward if start_p >= 0 else identity
+        fixed = True if start_p < 0 else fixed
         self.accumulate_real_sign = self.accumulate_real_sign if not fixed else self.accumulate_real_sign_no_op
         self.heuristic_update = self.heuristic_update if not fixed else self.heuristic_update_no_op
 
@@ -120,7 +121,7 @@ class AugmentPipe(torch.nn.Module):
 
     def heuristic_update(self):
         adjust = torch.sign(self.p_real_signs.compute() - self.ada_target) * (self.batch_size * self.ada_interval) / (self.ada_kimg * 1000)
-        self.p.copy_((self.p + adjust).max(torch.tensor(0, device=self.p.device).float()))
+        self.p.copy_((self.p + adjust).max(torch.tensor(0, device=self.p.device).float()).min(torch.tensor(self.ada_target, device=self.p.device).float()))
         self.p_real_signs.reset()
 
     def forward(self, images, disable_grid_sampling=False):
