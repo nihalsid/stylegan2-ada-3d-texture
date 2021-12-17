@@ -25,7 +25,7 @@ class AutoencoderTrainer(pl.LightningModule):
                                             Precision(compute_on_step=False), Recall(compute_on_step=False)])
 
     def configure_optimizers(self):
-        opt = torch.optim.Adam(list(self.model.parameters()), lr=self.config.lr_g, eps=1e-8, weight_decay=1e-4)
+        opt = torch.optim.Adam(list(self.model.parameters()), lr=self.config.lr_e, eps=1e-8, weight_decay=1e-4)
         return opt
 
     def forward(self, batch):

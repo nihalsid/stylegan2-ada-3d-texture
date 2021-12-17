@@ -30,6 +30,7 @@ resume: null
 num_mapping_layers: 2
 lr_g: 0.002
 lr_d: 0.00235
+lr_e: 0.0001
 lazy_gradient_penalty_interval: 16
 lazy_path_penalty_after: 0
 lazy_path_penalty_interval: 4
