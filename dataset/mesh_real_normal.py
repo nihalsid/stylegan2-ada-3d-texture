@@ -24,9 +24,6 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.image_size = config.image_size
         self.real_images = {x.name.split('.')[0]: x for x in Path(config.image_path).iterdir() if x.name.endswith('.jpg') or x.name.endswith('.png')}
         self.items = list(x.stem for x in Path(config.dataset_path).iterdir())[:limit_dataset_size]
-        self.condition_directory = None
-        if config.condition_path is not None:
-            self.condition_directory = Path(config.condition_path)
         self.target_name = "model_normalized.obj"
         self.views_per_sample = config.views_per_sample
         self.pair_meta, self.all_views = self.load_pair_meta(config.pairmeta_path)
@@ -51,20 +48,17 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         # noinspection PyTypeChecker
         mesh = trimesh.load(self.mesh_directory / selected_item / self.target_name, process=False)
         vertices = torch.from_numpy(mesh.vertices).float()
+        normals = torch.from_numpy(np.array(mesh.face_normals)).float()
         indices = torch.from_numpy(mesh.faces).int()
         tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
         vctr = torch.tensor(list(range(vertices.shape[0]))).long()
 
         real_sample, mvp = self.get_image_and_view(selected_item)
-        condition = None
-        if self.condition_directory is not None:
-            condition = np.load(str(self.condition_directory / f"{selected_item}.npy"))
-            condition = torch.from_numpy(condition).float()
 
         return {
             "name": selected_item,
+            "x": normals,
             "y": pt_arxiv['target_colors'].float() * 2,
-            "condition": condition,
             "vertex_ctr": vctr,
             "vertices": vertices,
             "indices_quad": indices,

@@ -1,4 +1,5 @@
 import torch
+import torch_geometric
 import torch_scatter
 
 
@@ -73,3 +74,98 @@ class Blur(torch.nn.Module):
         correction_factor = ((1 - face_is_pad[face_neighborhood].float()) * self.blur_filter.unsqueeze(0).expand(face_neighborhood.shape[0], -1)).sum(-1)
         correction_factor = correction_factor.unsqueeze(1).expand(-1, x.shape[1])
         return torch.nn.functional.conv2d(conv_input, self.weight).squeeze(-1).squeeze(-1).reshape(x.shape[0], x.shape[1]) / correction_factor
+
+
+class FaceConv(torch.nn.Module):
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.neighborhood_size = 8
+        self.conv = torch.nn.Conv2d(in_channels, out_channels, (1, self.neighborhood_size + 1), padding=0)
+
+    def forward(self, x, face_neighborhood, face_is_pad, pad_size):
+        return self.conv(create_faceconv_input(x, self.neighborhood_size + 1, face_neighborhood, face_is_pad, pad_size)).squeeze(-1).squeeze(-1)
+
+
+class GraphEncoder(torch.nn.Module):
+
+    def __init__(self, in_channels, conv_layer=FaceConv, norm=torch_geometric.nn.BatchNorm):
+
+        super().__init__()
+        self.activation = torch.nn.LeakyReLU()
+        self.enc_conv_in = torch.nn.Linear(in_channels, 32)
+        self.down_0_block_0 = FResNetBlock(32, 64, conv_layer, norm, self.activation)
+        self.down_0_block_1 = FResNetBlock(64, 64, conv_layer, norm, self.activation)
+        self.down_1_block_0 = FResNetBlock(64, 128, conv_layer, norm, self.activation)
+        self.down_2_block_0 = FResNetBlock(128, 128, conv_layer, norm, self.activation)
+        self.down_3_block_0 = FResNetBlock(128, 128, conv_layer, norm, self.activation)
+        self.down_4_block_0 = FResNetBlock(128, 256, conv_layer, norm, self.activation)
+        self.enc_mid_block_0 = FResNetBlock(256, 256, conv_layer, norm, self.activation)
+        self.enc_out_conv = conv_layer(256, 256)
+        self.enc_out_norm = norm(256)
+
+    def forward(self, x, graph_data):
+        level_feats = []
+        pool_ctr = 0
+        x = self.enc_conv_in(x)
+        x = self.down_0_block_0(x, graph_data['face_neighborhood'], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        x = self.down_0_block_1(x, graph_data['face_neighborhood'], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        level_feats.append(x)
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+        pool_ctr += 1
+
+        x = self.down_1_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        level_feats.append(x)
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+        pool_ctr += 1
+
+        x = self.down_2_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        level_feats.append(x)
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+        pool_ctr += 1
+
+        x = self.down_3_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        level_feats.append(x)
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+        pool_ctr += 1
+
+        x = self.down_4_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+
+        x = self.enc_mid_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        x = self.enc_out_norm(x)
+        x = self.activation(x)
+        x = self.enc_out_conv(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+
+        level_feats.append(x)
+
+        return level_feats
+
+
+class FResNetBlock(torch.nn.Module):
+
+    def __init__(self, nf_in, nf_out, conv_layer, norm, activation):
+        super().__init__()
+        self.nf_in = nf_in
+        self.nf_out = nf_out
+        self.norm_0 = norm(nf_in)
+        self.conv_0 = conv_layer(nf_in, nf_out)
+        self.norm_1 = norm(nf_out)
+        self.conv_1 = conv_layer(nf_out, nf_out)
+        self.activation = activation
+        if nf_in != nf_out:
+            self.nin_shortcut = conv_layer(nf_in, nf_out)
+
+    def forward(self, x, face_neighborhood, face_is_pad, num_pad):
+        h = x
+        h = self.norm_0(h)
+        h = self.activation(h)
+        h = self.conv_0(h, face_neighborhood, face_is_pad, num_pad)
+
+        h = self.norm_1(h)
+        h = self.activation(h)
+        h = self.conv_1(h, face_neighborhood, face_is_pad, num_pad)
+
+        if self.nf_in != self.nf_out:
+            x = self.nin_shortcut(x, face_neighborhood, face_is_pad, num_pad)
+
+        return x + h

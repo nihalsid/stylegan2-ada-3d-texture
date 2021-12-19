@@ -19,7 +19,7 @@ class Discriminator(torch.nn.Module):
             in_channels = channels_dict[res]
             out_channels = channels_dict[res // 2]
             self.module_list.append(DiscriminatorBlock(in_channels, out_channels))
-        self.module_list.append(DiscriminatorEpilogue(channels_dict[4], resolution=4, cmap_dim=channels_dict[4]))
+        self.module_list.append(DiscriminatorEpilogue(channels_dict[4], resolution=4, cmap_dim=(0 if c_dim == 0 else channels_dict[4])))
         self.module_list = torch.nn.ModuleList(self.module_list)
         if c_dim > 0:
             self.mapping = DiscriminatorMappingNetwork(c_dim=c_dim, cmap_dim=channels_dict[4], num_layers=w_num_layers)
