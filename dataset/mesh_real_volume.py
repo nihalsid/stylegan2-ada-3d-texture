@@ -98,11 +98,10 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     def get_image_and_view(self, shape):
         shape_id = int(shape.split('_')[0].split('shape')[1])
         image_selections = self.get_image_selections(shape_id)
-        view_selections = random.sample(self.all_views, self.views_per_sample)
         images, cameras = [], []
-        for c_i, c_v in zip(image_selections, view_selections):
+        for c_i in image_selections:
             images.append(self.get_real_image(self.meta_to_pair(c_i)))
-            perspective_cam = spherical_coord_to_cam(c_v['fov'], c_v['azimuth'], c_v['elevation'])
+            perspective_cam = spherical_coord_to_cam(c_i['fov'], c_i['azimuth'], c_i['elevation'])
             # projection_matrix = intrinsic_to_projection(get_default_perspective_cam()).float()
             projection_matrix = torch.from_numpy(perspective_cam.projection_mat()).float()
             # view_matrix = torch.from_numpy(np.linalg.inv(generate_camera(np.zeros(3), c['azimuth'], c['elevation']))).float()

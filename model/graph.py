@@ -130,6 +130,9 @@ class GraphEncoder(torch.nn.Module):
         pool_ctr += 1
 
         x = self.down_4_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        level_feats.append(x)
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+        pool_ctr += 1
 
         x = self.enc_mid_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.enc_out_norm(x)

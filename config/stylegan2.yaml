@@ -8,8 +8,8 @@
 #mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturesForGraphQuad32
 #mesh_resolution: 64
 
-dataset_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold_processed
-mesh_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold
+dataset_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres_processed
+mesh_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres
 pairmeta_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/metadata/pairs.json
 df_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/shapenet-chairs-manifold
 image_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars
@@ -42,10 +42,11 @@ ada_start_p: 0.  #to disable set to -1
 ada_target: 0.6
 ada_interval: 4
 ada_fixed: False
+g_channel_base: 16384
 d_channel_base: 16384
 
 image_size: 64
-num_faces: [6144, 1536, 384, 96, 24]
+num_faces: [24576, 6144, 1536, 384, 96, 24]
 #image_size: 32
 #num_faces: [1024, 256, 64, 16]
 #image_size: 64

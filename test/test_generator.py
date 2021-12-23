@@ -4,7 +4,7 @@ from tqdm import tqdm
 import hydra
 
 from dataset import GraphDataLoader, to_device
-from dataset.mesh_real import FaceGraphMeshDataset
+from dataset.mesh_real_normal import FaceGraphMeshDataset
 from model import modulated_conv2d
 from model.graph_generator import Generator
 from model.graph import modulated_face_conv, GraphEncoder
@@ -39,17 +39,17 @@ def test_generator(config):
 @hydra.main(config_path='../config', config_name='stylegan2')
 def test_generator_u(config):
     from model.graph_generator_u import Generator
-    batch_size = 16
+    batch_size = 4
     dataset = FaceGraphMeshDataset(config)
     dataloader = GraphDataLoader(dataset, batch_size=batch_size, num_workers=0)
-    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3).cuda()
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base).cuda()
     E = GraphEncoder(3).cuda()
+    print_model_parameter_count(G)
     print_model_parameter_count(E)
-    normals = torch.randn(6144 * batch_size, 3).cuda()
     for batch_idx, batch in enumerate(tqdm(dataloader)):
         # sanity test forward pass
         batch = to_device(batch, torch.device("cuda:0"))
-        shape = E(normals, batch['graph_data'])
+        shape = E(batch['x'], batch['graph_data'])
         z = torch.randn(batch_size, 512).to(torch.device("cuda:0"))
         w = G.mapping(z)
         t0 = time.time()

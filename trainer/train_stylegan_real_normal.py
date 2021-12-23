@@ -32,7 +32,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters(config)
         self.config = config
-        self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3)
+        self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base)
         self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, channel_base=config.d_channel_base)
         self.E = GraphEncoder(3)
         self.R = None

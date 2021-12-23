@@ -6,14 +6,14 @@ from model.graph import create_faceconv_input, SmoothUpsample, modulated_face_co
 
 class Generator(torch.nn.Module):
 
-    def __init__(self, z_dim, w_dim, w_num_layers, num_faces, color_channels, c_dim=0):
+    def __init__(self, z_dim, w_dim, w_num_layers, num_faces, color_channels, c_dim=0, channel_base=16384):
         super().__init__()
         self.z_dim = z_dim
         self.w_dim = w_dim
         self.c_dim = c_dim
         self.num_faces = num_faces
         self.color_channels = color_channels
-        self.synthesis = SynthesisNetwork(w_dim=w_dim, num_faces=num_faces, color_channels=color_channels)
+        self.synthesis = SynthesisNetwork(w_dim=w_dim, num_faces=num_faces, color_channels=color_channels, channel_base=channel_base)
         self.num_ws = self.synthesis.num_ws
         self.mapping = MappingNetwork(z_dim=z_dim, w_dim=w_dim, c_dim=c_dim, num_ws=self.num_ws, num_layers=w_num_layers)
 
@@ -32,7 +32,7 @@ class SynthesisNetwork(torch.nn.Module):
         self.color_channels = color_channels
         self.block_pow_2 = [2 ** i for i in range(2, len(self.num_faces) + 2)]
         channels_dict = {res: min(channel_base // res, channel_max) for res in self.block_pow_2}
-        channels_dict_geo = {4: 256, 8: 128, 16: 128, 32: 128, 64: 0}
+        channels_dict_geo = {4: 256, 8: 256, 16: 128, 32: 128, 64: 128, 128: 0}
         self.blocks = torch.nn.ModuleList()
         block_level = len(self.block_pow_2) - 1
         self.num_ws = 2 * len(self.block_pow_2)
