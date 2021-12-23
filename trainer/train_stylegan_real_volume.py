@@ -33,7 +33,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.save_hyperparameters(config)
         self.config = config
         self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, c_dim=config.condition_dim)
-        self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, c_dim=config.condition_dim)
+        self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, c_dim=config.condition_dim, channel_base=config.d_channel_base)
         self.E = Encoder(ch=8, ch_mult=(1, 2, 4, 8, 8), num_res_blocks=2, attn_resolutions=[2], dropout=0.0, resamp_with_conv=True, in_channels=1, resolution=32, z_channels=64, double_z=False)
         self.R = None
         self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size)

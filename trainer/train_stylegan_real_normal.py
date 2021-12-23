@@ -33,7 +33,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.save_hyperparameters(config)
         self.config = config
         self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3)
-        self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers)
+        self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, channel_base=config.d_channel_base)
         self.E = GraphEncoder(3)
         self.R = None
         self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size)
@@ -168,8 +168,6 @@ class StyleGAN2Trainer(pl.LightningModule):
                 batch = to_device(batch, self.device)
                 self.set_shape_codes(batch)
                 shape = batch['shape']
-                if shape is not None:
-                    shape = shape.to(self.device)
                 real_render = batch['real'].cpu()
                 fake_render = self.render(self.G(batch['graph_data'], latents[iter_idx % len(latents)].to(self.device), shape, noise_mode='const'), batch).cpu()
                 save_image(real_render, odir_samples / f"real_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)

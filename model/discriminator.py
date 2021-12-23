@@ -130,7 +130,7 @@ class DiscriminatorMappingNetwork(torch.nn.Module):
 
 if __name__ == '__main__':
     from util.misc import print_model_parameter_count, print_module_summary
-
-    model = Discriminator(img_resolution=64, img_channels=3)
-    print_module_summary(model, (torch.randn((16, 3, 64, 64)), ))
+    img_res = 128
+    model = Discriminator(img_resolution=img_res, img_channels=3, channel_base=2 ** 13)
+    print_module_summary(model, (torch.randn((16, 3, img_res, img_res)), ))
     print_model_parameter_count(model)

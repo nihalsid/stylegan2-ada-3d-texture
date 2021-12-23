@@ -32,7 +32,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.save_hyperparameters(config)
         self.config = config
         self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, c_dim=config.condition_dim)
-        self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, c_dim=config.condition_dim)
+        self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, c_dim=config.condition_dim, channel_base=config.d_channel_base)
         self.R = None
         self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size)
         # print_module_summary(self.G, (torch.zeros(self.config.batch_size, self.config.latent_dim), ))
@@ -121,17 +121,16 @@ class StyleGAN2Trainer(pl.LightningModule):
         # optimize generator
         self.g_step(batch)
 
+        # regularize generator
         if self.global_step > self.config.lazy_path_penalty_after and (self.global_step + 1) % self.config.lazy_path_penalty_interval == 0:
             self.g_regularizer(batch)
-
-        # torch.nn.utils.clip_grad_norm_(self.G.parameters(), max_norm=1.0)
 
         self.ema.update(self.G.parameters())
 
         # optimize discriminator
-
         self.d_step(batch)
 
+        # regularize discriminator
         if (self.global_step + 1) % self.config.lazy_gradient_penalty_interval == 0:
             self.d_regularizer(batch)
 
