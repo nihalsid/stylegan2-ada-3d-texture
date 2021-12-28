@@ -125,27 +125,14 @@ class ToRGBLayer(torch.nn.Module):
         self.kernel_size = kernel_size
         self.num_face = num_face
         self.affine = FullyConnectedLayer(w_dim, in_channels, bias_init=1)
-        self.weight_0 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
-        self.weight_1 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
-        self.weight_2 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
+        self.weight = torch.nn.Parameter(torch.randn([out_channels, in_channels, 1, kernel_size ** 2]))
         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
         self.weight_gain = 1 / np.sqrt(in_channels * (kernel_size ** 2))
-        self.reset_weight_parameters()
-
-    def reset_weight_parameters(self):
-        init.kaiming_uniform_(self.weight_0, a=math.sqrt(5))
-        init.kaiming_uniform_(self.weight_1, a=math.sqrt(5))
-        init.kaiming_uniform_(self.weight_2, a=math.sqrt(5))
-
-    def create_symmetric_conv_filter(self):
-        return torch.cat([self.weight_0, self.weight_1, self.weight_2,
-                          self.weight_1, self.weight_2, self.weight_1,
-                          self.weight_2, self.weight_1, self.weight_2], dim=-1)
 
     def forward(self, x, face_neighborhood, face_is_pad, pad_size, w):
         styles = self.affine(w) * self.weight_gain
         x = create_faceconv_input(x, self.kernel_size ** 2, face_neighborhood, face_is_pad, pad_size)
-        x = modulated_face_conv(x=x, weight=self.create_symmetric_conv_filter(), styles=styles, demodulate=False)
+        x = modulated_face_conv(x=x, weight=self.weight, styles=styles, demodulate=False)
         return torch.clamp(x + self.bias[None, :], -256, 256)
 
 
