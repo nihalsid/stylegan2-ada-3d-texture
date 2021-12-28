@@ -94,7 +94,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         fake_loss = torch.nn.functional.softplus(p_fake).mean()
         self.manual_backward(fake_loss)
 
-        p_real = self.D(self.augment_pipe(batch['real']))
+        p_real = self.D(self.augment_pipe(self.train_set.get_color_bg_real(batch)))
         self.augment_pipe.accumulate_real_sign(p_real.sign().detach())
 
         # Get discriminator loss
@@ -111,7 +111,7 @@ class StyleGAN2Trainer(pl.LightningModule):
     def d_regularizer(self, batch):
         d_opt = self.optimizers()[1]
         d_opt.zero_grad(set_to_none=True)
-        image = batch['real']
+        image = self.train_set.get_color_bg_real(batch)
         image.requires_grad_()
         p_real = self.D(self.augment_pipe(image, True))
         gp = compute_gradient_penalty(image, p_real)
@@ -120,8 +120,8 @@ class StyleGAN2Trainer(pl.LightningModule):
         step(d_opt, self.D)
         self.log("rGP", gp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
 
-    def render(self, face_colors, batch):
-        rendered_color = self.R.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(face_colors, batch), batch["ranges"].cpu())
+    def render(self, face_colors, batch, use_bg_color=True):
+        rendered_color = self.R.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(face_colors, batch), batch["ranges"].cpu(), batch['bg'] if use_bg_color else None)
         return rendered_color.permute((0, 3, 1, 2))
 
     def training_step(self, batch, batch_idx):
@@ -161,7 +161,6 @@ class StyleGAN2Trainer(pl.LightningModule):
             self.ema.store(self.G.parameters())
             self.ema.copy_to([p for p in self.G.parameters() if p.requires_grad])
             self.export_grid("ema_", odir_grid, odir_fake)
-            self.ema.restore([p for p in self.G.parameters() if p.requires_grad])
         with Timer("export_samples"):
             latents = self.grid_z.split(self.config.batch_size)
             for iter_idx, batch in enumerate(self.val_dataloader()):
@@ -169,11 +168,12 @@ class StyleGAN2Trainer(pl.LightningModule):
                 self.set_shape_codes(batch)
                 shape = batch['shape']
                 real_render = batch['real'].cpu()
-                fake_render = self.render(self.G(batch['graph_data'], latents[iter_idx % len(latents)].to(self.device), shape, noise_mode='const'), batch).cpu()
+                fake_render = self.render(self.G(batch['graph_data'], latents[iter_idx % len(latents)].to(self.device), shape, noise_mode='const'), batch, use_bg_color=False).cpu()
                 save_image(real_render, odir_samples / f"real_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 save_image(fake_render, odir_samples / f"fake_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 for batch_idx in range(real_render.shape[0]):
                     save_image(real_render[batch_idx], odir_real / f"{iter_idx}_{batch_idx}.jpg", value_range=(-1, 1), normalize=True)
+        self.ema.restore([p for p in self.G.parameters() if p.requires_grad])
         fid_score = fid.compute_fid(odir_real, odir_fake, device=self.device)
         kid_score = fid.compute_kid(odir_real, odir_fake, device=self.device)
         self.log(f"fid", fid_score, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True, sync_dist=True)
@@ -214,7 +214,7 @@ class StyleGAN2Trainer(pl.LightningModule):
             z = z.to(self.device)
             eval_batch = to_device(next(grid_loader), self.device)
             self.set_shape_codes(eval_batch)
-            fake = self.render(self.G(eval_batch['graph_data'], z, eval_batch['shape'], noise_mode='const'), eval_batch).cpu()
+            fake = self.render(self.G(eval_batch['graph_data'], z, eval_batch['shape'], noise_mode='const'), eval_batch, use_bg_color=False).cpu()
             if output_dir_fid is not None:
                 for batch_idx in range(fake.shape[0]):
                     save_image(fake[batch_idx], output_dir_fid / f"{iter_idx}_{batch_idx}.jpg", value_range=(-1, 1), normalize=True)
@@ -227,7 +227,7 @@ class StyleGAN2Trainer(pl.LightningModule):
     def create_directories(self):
         output_dir_fid_real = Path(f'runs/{self.config.experiment}/fid/real')
         output_dir_fid_fake = Path(f'runs/{self.config.experiment}/fid/fake')
-        output_dir_samples = Path(f'runs/{self.config.experiment}/images/')
+        output_dir_samples = Path(f'runs/{self.config.experiment}/images/{self.global_step:06d}')
         output_dir_textures = Path(f'runs/{self.config.experiment}/textures/')
         for odir in [output_dir_fid_real, output_dir_fid_fake, output_dir_samples, output_dir_textures]:
             odir.mkdir(exist_ok=True, parents=True)

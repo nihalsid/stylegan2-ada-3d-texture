@@ -187,7 +187,7 @@ class Collater(object):
         elif isinstance(elem, Mapping):
             retdict = {}
             for key in elem:
-                if key in ['x', 'y']:
+                if key in ['x', 'y', 'bg']:
                     retdict[key] = self.cat_collate([d[key] for d in batch])
                 elif key == 'vertices':
                     retdict[key] = self.cat_collate([transform_pos_mvp(d['vertices'], d['mvp']) for d in batch])

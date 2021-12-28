@@ -1,7 +1,6 @@
 import json
 import os
 import random
-import cv2
 from collections import defaultdict
 from pathlib import Path
 
@@ -27,6 +26,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.items = list(x.stem for x in Path(config.dataset_path).iterdir())[:limit_dataset_size]
         self.target_name = "model_normalized.obj"
         self.views_per_sample = config.views_per_sample
+        self.color_generator = random_color if config.random_bg == 'color' else (random_grayscale if config.random_bg == 'grayscale' else white)
         self.pair_meta, self.all_views = self.load_pair_meta(config.pairmeta_path)
         self.real_images_preloaded, self.masks_preloaded = {}, {}
         if config.preload:
@@ -55,6 +55,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         vctr = torch.tensor(list(range(vertices.shape[0]))).long()
 
         real_sample, real_mask, mvp = self.get_image_and_view(selected_item)
+        background = self.color_generator(self.views_per_sample)
 
         return {
             "name": selected_item,
@@ -66,6 +67,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "mvp": mvp,
             "real": real_sample,
             "mask": real_mask,
+            "bg": torch.cat([background, torch.ones([background.shape[0], 1, 1, 1])], dim=1),
             "indices": tri_indices,
             "ranges": torch.tensor([0, tri_indices.shape[0]]).int(),
             "graph_data": self.get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, is_pad, level_masks)
@@ -165,3 +167,28 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     @staticmethod
     def meta_to_pair(c):
         return f'shape{c["shape_id"]:05d}_rank{(c["rank"] - 1):02d}_pair{c["id"]}'
+
+    @staticmethod
+    def get_color_bg_real(batch):
+        real_sample = batch['real'] * batch['mask'].expand(-1, 3, -1, -1) + (1 - batch['mask']).expand(-1, 3, -1, -1) * batch['bg'][:, :3, :, :]
+        return real_sample
+
+
+def random_color(num_views):
+    randoms = []
+    for i in range(num_views):
+        r, g, b = random.randint(0, 255) / 127.5 - 1, random.randint(0, 255) / 127.5 - 1, random.randint(0, 255) / 127.5 - 1
+        randoms.append(torch.from_numpy(np.array([r, g, b]).reshape((1, 3, 1, 1))).float())
+    return torch.cat(randoms, dim=0)
+
+
+def random_grayscale(num_views):
+    randoms = []
+    for i in range(num_views):
+        c = random.randint(0, 255) / 127.5 - 1
+        randoms.append(torch.from_numpy(np.array([c, c, c]).reshape((1, 3, 1, 1))).float())
+    return torch.cat(randoms, dim=0)
+
+
+def white(num_views):
+    return torch.from_numpy(np.array([1, 1, 1]).reshape((1, 3, 1, 1))).expand(num_views, -1, -1, -1).float()

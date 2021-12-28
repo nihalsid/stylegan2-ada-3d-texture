@@ -2,9 +2,6 @@ import torch
 from torch import nn
 import nvdiffrast.torch as dr
 from torchvision.ops import masks_to_boxes
-import torchvision.transforms as T
-
-from util.timer import Timer
 
 
 def transform_pos(pos, projection_matrix, world_to_cam_matrix):
@@ -21,24 +18,32 @@ def transform_pos_mvp(pos, mvp):
     return torch.bmm(posw.unsqueeze(0).expand(mvp.shape[0], -1, -1), mvp.permute((0, 2, 1))).reshape((-1, 4))
 
 
-def render(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ranges):
+def render(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ranges, background=None):
     rast_out, _ = dr.rasterize(glctx, pos_clip, pos_idx, resolution=[resolution, resolution], ranges=ranges)
     color, _ = dr.interpolate(vtx_col[None, ...], rast_out, col_idx)
     color = dr.antialias(color, rast_out, pos_clip, pos_idx)
     mask = color[..., -1:] == 0
-    one_tensor = torch.as_tensor(1.0, dtype=torch.float32, device=color.device)
-    color = torch.where(mask, one_tensor, color)
+    if background is None:
+        one_tensor = torch.ones((color.shape[0], color.shape[3], 1, 1), device=color.device)
+    else:
+        one_tensor = background
+    one_tensor_permuted = one_tensor.permute((0, 2, 3, 1)).contiguous()
+    color = torch.where(mask, one_tensor_permuted, color)
     return color[:, :, :, :-1]
 
 
-def render_in_bounds(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ranges):
+def render_in_bounds(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ranges, background=None):
     render_resolution = int(resolution * 1.2)
     rast_out, _ = dr.rasterize(glctx, pos_clip, pos_idx, resolution=[render_resolution, render_resolution], ranges=ranges)
     color, _ = dr.interpolate(vtx_col[None, ...], rast_out, col_idx)
     color = dr.antialias(color, rast_out, pos_clip, pos_idx)
     mask = color[..., -1:] == 0
-    one_tensor = torch.as_tensor(1.0, dtype=torch.float32, device=color.device)
-    color = torch.where(mask, one_tensor, color)[:, :, :, :-1]
+    if background is None:
+        one_tensor = torch.ones((color.shape[0], color.shape[3], 1, 1), device=color.device)
+    else:
+        one_tensor = background
+    one_tensor_permuted = one_tensor.permute((0, 2, 3, 1)).contiguous()
+    color = torch.where(mask, one_tensor_permuted, color)[:, :, :, :-1]
     color_crops = []
     boxes = masks_to_boxes(torch.logical_not(mask.squeeze(-1)))
     for img_idx in range(color.shape[0]):
@@ -59,8 +64,11 @@ def render_in_bounds(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ran
             additional_pad = int((x2 - x1) * 0.1)
         for i in range(4):
             pad[i // 2][i % 2] += additional_pad
-        color_crop = T.Pad((pad[0][0], pad[1][0], pad[0][1], pad[1][1]), 1)(color_crop)
-        color_crop = torch.nn.functional.interpolate(color_crop.unsqueeze(0), size=(resolution, resolution), mode='bilinear', align_corners=False).permute((0, 2, 3, 1))
+
+        padded = torch.ones((color_crop.shape[0], color_crop.shape[1] + pad[1][0] + pad[1][1], color_crop.shape[2] + pad[0][0] + pad[0][1]), device=color_crop.device) * one_tensor[img_idx, :3, :, :]
+        padded[:, pad[1][0]: padded.shape[1] - pad[1][1], pad[0][0]: padded.shape[2] - pad[0][1]] = color_crop
+        # color_crop = T.Pad((pad[0][0], pad[1][0], pad[0][1], pad[1][1]), 1)(color_crop)
+        color_crop = torch.nn.functional.interpolate(padded.unsqueeze(0), size=(resolution, resolution), mode='bilinear', align_corners=False).permute((0, 2, 3, 1))
         color_crops.append(color_crop)
     return torch.cat(color_crops, dim=0)
 
@@ -87,8 +95,8 @@ class DifferentiableRenderer(nn.Module):
         if mode == 'bounds':
             self.render_func = render_in_bounds
 
-    def render(self, vertex_positions, triface_indices, vertex_colors, ranges=None):
+    def render(self, vertex_positions, triface_indices, vertex_colors, ranges=None, background=None):
         if ranges is None:
             ranges = torch.tensor([[0, triface_indices.shape[0]]]).int()
-        color = self.render_func(self.glctx, vertex_positions, triface_indices, vertex_colors, triface_indices, self.resolution, ranges)
+        color = self.render_func(self.glctx, vertex_positions, triface_indices, vertex_colors, triface_indices, self.resolution, ranges, background)
         return color

@@ -41,7 +41,8 @@ def test_view_angles_together(config):
     Path("runs/images_compare").mkdir(exist_ok=True)
     for batch_idx, batch in enumerate(tqdm(dataloader)):
         batch = to_device(batch, torch.device("cuda:0"))
-        rendered_color_gt = render_helper.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(batch["y"], batch), batch["ranges"].cpu())
+        batch['real'] = dataset.get_color_bg_real(batch)
+        rendered_color_gt = render_helper.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(batch["y"], batch), batch["ranges"].cpu(), batch['bg'])
         save_image(torch.cat([batch['real'], batch['mask'].expand(-1, 3, -1, -1), rendered_color_gt.permute((0, 3, 1, 2))]), f"runs/images_compare/test_view_{batch_idx:04d}.png", nrow=4, value_range=(-1, 1), normalize=True)
 
 
