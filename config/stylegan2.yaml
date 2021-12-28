@@ -46,6 +46,8 @@ ada_fixed: False
 g_channel_base: 16384
 d_channel_base: 16384
 
+random_bg: white
+
 image_size: 64
 num_faces: [24576, 6144, 1536, 384, 96, 24]
 #image_size: 32
