@@ -2,6 +2,8 @@ import torch
 import numpy as np
 from model import activation_funcs, FullyConnectedLayer, clamp_gain, normalize_2nd_moment
 from model.graph import create_faceconv_input, SmoothUpsample, modulated_face_conv
+from torch.nn import init
+import math
 
 
 class Generator(torch.nn.Module):
@@ -123,14 +125,27 @@ class ToRGBLayer(torch.nn.Module):
         self.kernel_size = kernel_size
         self.num_face = num_face
         self.affine = FullyConnectedLayer(w_dim, in_channels, bias_init=1)
-        self.weight = torch.nn.Parameter(torch.randn([out_channels, in_channels, 1, kernel_size ** 2]))
+        self.weight_0 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
+        self.weight_1 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
+        self.weight_2 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
         self.weight_gain = 1 / np.sqrt(in_channels * (kernel_size ** 2))
+        self.reset_weight_parameters()
+
+    def reset_weight_parameters(self):
+        init.kaiming_uniform_(self.weight_0, a=math.sqrt(5))
+        init.kaiming_uniform_(self.weight_1, a=math.sqrt(5))
+        init.kaiming_uniform_(self.weight_2, a=math.sqrt(5))
+
+    def create_symmetric_conv_filter(self):
+        return torch.cat([self.weight_0, self.weight_1, self.weight_2,
+                          self.weight_1, self.weight_2, self.weight_1,
+                          self.weight_2, self.weight_1, self.weight_2], dim=-1)
 
     def forward(self, x, face_neighborhood, face_is_pad, pad_size, w):
         styles = self.affine(w) * self.weight_gain
         x = create_faceconv_input(x, self.kernel_size ** 2, face_neighborhood, face_is_pad, pad_size)
-        x = modulated_face_conv(x=x, weight=self.weight, styles=styles, demodulate=False)
+        x = modulated_face_conv(x=x, weight=self.create_symmetric_conv_filter(), styles=styles, demodulate=False)
         return torch.clamp(x + self.bias[None, :], -256, 256)
 
 
@@ -144,12 +159,25 @@ class SynthesisLayer(torch.nn.Module):
         self.activation = activation_funcs[activation]['fn']
         self.activation_gain = activation_funcs[activation]['def_gain']
         self.affine = FullyConnectedLayer(w_dim, in_channels, bias_init=1)
-        self.weight = torch.nn.Parameter(torch.randn([out_channels, in_channels, 1,  kernel_size ** 2]))
+        self.weight_0 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
+        self.weight_1 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
+        self.weight_2 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
 
         self.register_buffer('noise_const', torch.randn([num_face, ]))
         self.noise_strength = torch.nn.Parameter(torch.zeros([1]))
 
         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
+        self.reset_weight_parameters()
+
+    def reset_weight_parameters(self):
+        init.kaiming_uniform_(self.weight_0, a=math.sqrt(5))
+        init.kaiming_uniform_(self.weight_1, a=math.sqrt(5))
+        init.kaiming_uniform_(self.weight_2, a=math.sqrt(5))
+
+    def create_symmetric_conv_filter(self):
+        return torch.cat([self.weight_0, self.weight_1, self.weight_2,
+                          self.weight_1, self.weight_2, self.weight_1,
+                          self.weight_2, self.weight_1, self.weight_2], dim=-1)
 
     def forward(self, x, face_neighborhood, face_is_pad, pad_size, pool_map, w, noise_mode, gain=1):
         styles = self.affine(w)
@@ -161,7 +189,7 @@ class SynthesisLayer(torch.nn.Module):
             noise = self.noise_const.unsqueeze(0).repeat([styles.shape[0], 1]).reshape([styles.shape[0] * self.num_face, 1]) * self.noise_strength
 
         x = create_faceconv_input(x, self.kernel_size ** 2, face_neighborhood[0], face_is_pad[0], pad_size[0])
-        x = modulated_face_conv(x=x, weight=self.weight, styles=styles)
+        x = modulated_face_conv(x=x, weight=self.create_symmetric_conv_filter(), styles=styles)
         if self.resampler is not None:
             x = self.resampler(x, face_neighborhood[1], face_is_pad[1], pad_size[1], pool_map)
         x = x + noise

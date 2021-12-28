@@ -98,6 +98,7 @@ class SymmetricFaceConv(torch.nn.Module):
         self.weight_0 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
         self.weight_1 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
         self.weight_2 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
+        self.neighborhood_size = 8
         self.bias = torch.nn.Parameter(torch.empty(out_channels))
         self.reset_parameters()
 
@@ -122,7 +123,7 @@ class SymmetricFaceConv(torch.nn.Module):
 
 class GraphEncoder(torch.nn.Module):
 
-    def __init__(self, in_channels, conv_layer=FaceConv, norm=torch_geometric.nn.BatchNorm):
+    def __init__(self, in_channels, conv_layer=SymmetricFaceConv, norm=torch_geometric.nn.BatchNorm):
 
         super().__init__()
         self.activation = torch.nn.LeakyReLU()
