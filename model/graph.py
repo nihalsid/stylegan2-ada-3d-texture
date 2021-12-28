@@ -1,6 +1,8 @@
 import torch
 import torch_geometric
 import torch_scatter
+import math
+from torch.nn import init
 
 
 def pool(x, node_count, pool_map, pool_op='max'):
@@ -85,6 +87,37 @@ class FaceConv(torch.nn.Module):
 
     def forward(self, x, face_neighborhood, face_is_pad, pad_size):
         return self.conv(create_faceconv_input(x, self.neighborhood_size + 1, face_neighborhood, face_is_pad, pad_size)).squeeze(-1).squeeze(-1)
+
+
+class SymmetricFaceConv(torch.nn.Module):
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.weight_0 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
+        self.weight_1 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
+        self.weight_2 = torch.nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
+        self.bias = torch.nn.Parameter(torch.empty(out_channels))
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        init.kaiming_uniform_(self.weight_0, a=math.sqrt(5))
+        init.kaiming_uniform_(self.weight_1, a=math.sqrt(5))
+        init.kaiming_uniform_(self.weight_2, a=math.sqrt(5))
+        if self.bias is not None:
+            fan_in, _ = init._calculate_fan_in_and_fan_out(torch.empty((self.out_channels, self.in_channels, 1, 9)))
+            bound = 1 / math.sqrt(fan_in)
+            init.uniform_(self.bias, -bound, bound)
+
+    def create_symmetric_conv_filter(self):
+        return torch.cat([self.weight_0, self.weight_1, self.weight_2,
+                          self.weight_1, self.weight_2, self.weight_1,
+                          self.weight_2, self.weight_1, self.weight_2], dim=-1)
+
+    def forward(self, x, face_neighborhood, face_is_pad, pad_size):
+        conv_input = create_faceconv_input(x, self.neighborhood_size + 1, face_neighborhood, face_is_pad, pad_size)
+        return torch.nn.functional.conv2d(conv_input, self.create_symmetric_conv_filter(), self.bias).squeeze(-1).squeeze(-1)
 
 
 class GraphEncoder(torch.nn.Module):
