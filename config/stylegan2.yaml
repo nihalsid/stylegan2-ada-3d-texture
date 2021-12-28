@@ -13,6 +13,7 @@ mesh_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manif
 pairmeta_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/metadata/pairs.json
 df_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/shapenet-chairs-manifold
 image_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars
+mask_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars_mask
 condition_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold_autoencoder
 
 mesh_resolution: 64

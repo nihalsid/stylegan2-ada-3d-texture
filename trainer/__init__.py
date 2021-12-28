@@ -50,7 +50,6 @@ def generate_experiment_name(name, config):
 
 
 def create_trainer(name, config):
-    ds_name = Path(config.dataset_path).name
     if not config.wandb_main and config.suffix == '':
         config.suffix = '-dev'
     config.experiment = generate_experiment_name(name, config)
@@ -80,7 +79,7 @@ def create_trainer(name, config):
 
     if gpu_count > 1:
 
-        config.val_check_interval *= gpu_count
+        # config.val_check_interval *= gpu_count
         trainer = Trainer(gpus=-1,
                           accelerator='ddp',
                           plugins=DDPPlugin(find_unused_parameters=True),
