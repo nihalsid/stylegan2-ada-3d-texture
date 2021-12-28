@@ -143,10 +143,20 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         t_image = resize(pad(read_image(str(path)).float() / 127.5 - 1))
         return t_image.unsqueeze(0)
 
+    @staticmethod
+    def erode_mask(mask):
+        import cv2 as cv
+        mask = mask.squeeze(0).numpy().astype(np.uint8)
+        kernel_size = 2
+        element = cv.getStructuringElement(cv.MORPH_ELLIPSE, (2 * kernel_size + 1, 2 * kernel_size + 1), (kernel_size, kernel_size))
+        mask = cv.erode(mask, element)
+        return torch.from_numpy(mask).unsqueeze(0)
+
     def process_real_mask(self, path):
         resize = T.Resize(size=(self.image_size, self.image_size))
         pad = T.Pad(padding=(100, 100), fill=0)
-        t_mask = resize(pad((read_image(str(path)) > 0).float()))
+        eroded_mask = self.erode_mask(read_image(str(path)))
+        t_mask = resize(pad((eroded_mask > 0).float()))
         return t_mask.unsqueeze(0)
 
     def load_pair_meta(self, pairmeta_path):
