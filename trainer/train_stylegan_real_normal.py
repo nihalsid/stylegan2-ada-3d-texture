@@ -21,6 +21,9 @@ from model.loss import PathLengthPenalty, compute_gradient_penalty
 from trainer import create_trainer
 from util.timer import Timer
 
+import torch.multiprocessing
+torch.multiprocessing.set_sharing_strategy('file_system')
+
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
