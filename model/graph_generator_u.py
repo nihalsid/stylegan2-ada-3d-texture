@@ -37,14 +37,14 @@ class SynthesisNetwork(torch.nn.Module):
         block_level = len(self.block_pow_2) - 1
         self.num_ws = 2 * len(self.block_pow_2)
         self.first_block = SynthesisPrologue(channels_dict[self.block_pow_2[0]], w_dim=w_dim, geo_channels=channels_dict_geo[4], num_face=num_faces[block_level], color_channels=color_channels)
-        for cdict_key in self.block_pow_2[1:]:
+        for blk_idx, cdict_key in enumerate(self.block_pow_2[1:]):
             block_level -= 1
             in_channels = channels_dict[cdict_key // 2]
             geo_channels = channels_dict_geo[cdict_key]
             out_channels = channels_dict[cdict_key]
             block = SynthesisBlock(in_channels, out_channels, w_dim=w_dim, geo_channels=geo_channels,
                                    num_face=num_faces[block_level],
-                                   color_channels=color_channels)
+                                   color_channels=color_channels, last_block=blk_idx == (len(self.block_pow_2[1:]) - 1))
             self.blocks.append(block)
 
     def forward(self, graph_data, ws, shape, noise_mode='random'):
@@ -89,7 +89,7 @@ class SynthesisPrologue(torch.nn.Module):
 
 class SynthesisBlock(torch.nn.Module):
 
-    def __init__(self, in_channels, out_channels, w_dim, geo_channels, num_face, color_channels):
+    def __init__(self, in_channels, out_channels, w_dim, geo_channels, num_face, color_channels, last_block):
         super().__init__()
         self.in_channels = in_channels
         self.w_dim = w_dim
@@ -101,6 +101,7 @@ class SynthesisBlock(torch.nn.Module):
         self.conv0 = SynthesisLayer(in_channels, out_channels, w_dim=w_dim, num_face=num_face, resampler=self.resampler)
         self.conv1 = SynthesisLayer(out_channels, out_channels - geo_channels, w_dim=w_dim, num_face=num_face)
         self.torgb = ToRGBLayer(out_channels - geo_channels, color_channels, w_dim=w_dim, num_face=num_face)
+        self.last_block = last_block
 
     def forward(self, face_neighborhood, face_is_pad, pad_size, pool_map, x, img, ws, shape, noise_mode):
         w_iter = iter(ws.unbind(dim=1))
@@ -112,6 +113,9 @@ class SynthesisBlock(torch.nn.Module):
         y = self.torgb(x, face_neighborhood[1], face_is_pad[1], pad_size[1], next(w_iter))
         img = self.resampler(img, face_neighborhood[1], face_is_pad[1], pad_size[1], pool_map[0])
         img = img.add_(y)
+
+        if self.last_block:
+            img = torch.nn.Tanh()(img)
 
         return x, img
 
