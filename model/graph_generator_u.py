@@ -115,7 +115,7 @@ class SynthesisBlock(torch.nn.Module):
         img = img.add_(y)
 
         if self.last_block:
-            img = torch.nn.Tanh()(img)
+            img = torch.clamp(img, -1, 1)
 
         return x, img
 
