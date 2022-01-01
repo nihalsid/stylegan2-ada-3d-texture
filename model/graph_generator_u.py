@@ -114,8 +114,8 @@ class SynthesisBlock(torch.nn.Module):
         img = self.resampler(img, face_neighborhood[1], face_is_pad[1], pad_size[1], pool_map[0])
         img = img.add_(y)
 
-        if self.last_block:
-            img = torch.clamp(img, -1, 1)
+        # if self.last_block:
+        #     img = torch.clamp(img, -1, 1)
 
         return x, img
 
