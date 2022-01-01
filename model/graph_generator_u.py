@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from model import activation_funcs, FullyConnectedLayer, clamp_gain, normalize_2nd_moment
 from model.graph import create_faceconv_input, SmoothUpsample, modulated_face_conv
+from util.embedder import get_embedder_nerf
 
 
 class Generator(torch.nn.Module):
@@ -44,7 +45,7 @@ class SynthesisNetwork(torch.nn.Module):
             out_channels = channels_dict[cdict_key]
             block = SynthesisBlock(in_channels, out_channels, w_dim=w_dim, geo_channels=geo_channels,
                                    num_face=num_faces[block_level],
-                                   color_channels=color_channels, last_block=blk_idx == (len(self.block_pow_2[1:]) - 1))
+                                   color_channels=color_channels)
             self.blocks.append(block)
 
     def forward(self, graph_data, ws, shape, noise_mode='random'):
@@ -56,6 +57,7 @@ class SynthesisNetwork(torch.nn.Module):
                                           graph_data['is_pad'][block_level],
                                           graph_data['pads'][block_level],
                                           appended_pool_maps[block_level],
+                                          graph_data['positions'][block_level],
                                           split_ws[0], noise_mode)
         for i in range(len(self.num_faces) - 1):
             block_level -= 1
@@ -63,7 +65,8 @@ class SynthesisNetwork(torch.nn.Module):
                                                          [graph_data['is_pad'][block_level + 1], graph_data['is_pad'][block_level]], \
                                                          [graph_data['pads'][block_level + 1], graph_data['pads'][block_level]], \
                                                          [appended_pool_maps[block_level + 1], appended_pool_maps[block_level]]
-            x, face_colors = self.blocks[i](sub_neighborhoods, is_pad, pads, pool_maps, x, face_colors, split_ws[i + 1], shape[len(shape) - 1 - i], noise_mode)
+            x, face_colors = self.blocks[i](sub_neighborhoods, is_pad, pads, pool_maps, graph_data['positions'][block_level],
+                                            x, face_colors, split_ws[i + 1], shape[len(shape) - 1 - i], noise_mode)
 
         return face_colors
 
@@ -79,17 +82,17 @@ class SynthesisPrologue(torch.nn.Module):
         self.conv1 = SynthesisLayer(out_channels, out_channels - geo_channels, w_dim=w_dim, num_face=num_face)
         self.torgb = ToRGBLayer(out_channels - geo_channels, color_channels, w_dim=w_dim, num_face=num_face)
 
-    def forward(self, face_neighborhood, face_is_pad, pad_size, pool_map, ws, noise_mode):
+    def forward(self, face_neighborhood, face_is_pad, pad_size, pool_map, positions, ws, noise_mode):
         w_iter = iter(ws.unbind(dim=1))
         x = self.const.unsqueeze(0).repeat([ws.shape[0], 1, 1]).reshape((self.num_face * ws.shape[0], -1))
         x = self.conv1(x, [face_neighborhood], [face_is_pad], [pad_size], pool_map, next(w_iter), noise_mode=noise_mode)
-        img = self.torgb(x, face_neighborhood, face_is_pad, pad_size, next(w_iter))
+        img = self.torgb(x, face_neighborhood, face_is_pad, pad_size, positions, next(w_iter))
         return x, img
 
 
 class SynthesisBlock(torch.nn.Module):
 
-    def __init__(self, in_channels, out_channels, w_dim, geo_channels, num_face, color_channels, last_block):
+    def __init__(self, in_channels, out_channels, w_dim, geo_channels, num_face, color_channels):
         super().__init__()
         self.in_channels = in_channels
         self.w_dim = w_dim
@@ -101,21 +104,17 @@ class SynthesisBlock(torch.nn.Module):
         self.conv0 = SynthesisLayer(in_channels, out_channels, w_dim=w_dim, num_face=num_face, resampler=self.resampler)
         self.conv1 = SynthesisLayer(out_channels, out_channels - geo_channels, w_dim=w_dim, num_face=num_face)
         self.torgb = ToRGBLayer(out_channels - geo_channels, color_channels, w_dim=w_dim, num_face=num_face)
-        self.last_block = last_block
 
-    def forward(self, face_neighborhood, face_is_pad, pad_size, pool_map, x, img, ws, shape, noise_mode):
+    def forward(self, face_neighborhood, face_is_pad, pad_size, pool_map, positions, x, img, ws, shape, noise_mode):
         w_iter = iter(ws.unbind(dim=1))
 
         x = torch.cat([x, shape], dim=1)
         x = self.conv0(x, face_neighborhood, face_is_pad, pad_size, pool_map[0], next(w_iter), noise_mode=noise_mode)
         x = self.conv1(x, face_neighborhood[1:], face_is_pad[1:], pad_size[1:], pool_map[1], next(w_iter), noise_mode=noise_mode)
 
-        y = self.torgb(x, face_neighborhood[1], face_is_pad[1], pad_size[1], next(w_iter))
+        y = self.torgb(x, face_neighborhood[1], face_is_pad[1], pad_size[1], positions, next(w_iter))
         img = self.resampler(img, face_neighborhood[1], face_is_pad[1], pad_size[1], pool_map[0])
         img = img.add_(y)
-
-        if self.last_block:
-            img = torch.nn.Tanh()(img)
 
         return x, img
 
@@ -127,15 +126,17 @@ class ToRGBLayer(torch.nn.Module):
         self.kernel_size = kernel_size
         self.num_face = num_face
         self.affine = FullyConnectedLayer(w_dim, in_channels, bias_init=1)
-        self.weight = torch.nn.Parameter(torch.randn([out_channels, in_channels, 1, kernel_size ** 2]))
-        self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
+        self.weight = torch.nn.Parameter(torch.randn([in_channels, in_channels, 1, kernel_size ** 2]))
+        self.bias = torch.nn.Parameter(torch.zeros([in_channels]))
         self.weight_gain = 1 / np.sqrt(in_channels * (kernel_size ** 2))
+        self.mlp = MLP(5, in_channels, 512, out_channels)
 
-    def forward(self, x, face_neighborhood, face_is_pad, pad_size, w):
+    def forward(self, x, face_neighborhood, face_is_pad, pad_size, positions, w):
         styles = self.affine(w) * self.weight_gain
         x = create_faceconv_input(x, self.kernel_size ** 2, face_neighborhood, face_is_pad, pad_size)
         x = modulated_face_conv(x=x, weight=self.weight, styles=styles, demodulate=False)
-        return torch.clamp(x + self.bias[None, :], -256, 256)
+        x = torch.clamp(x + self.bias[None, :], -256, 256)
+        return self.mlp(x, positions)
 
 
 class SynthesisLayer(torch.nn.Module):
@@ -171,6 +172,26 @@ class SynthesisLayer(torch.nn.Module):
         x = x + noise
 
         return clamp_gain(self.activation(x + self.bias[None, :]), self.activation_gain * gain, 256 * gain)
+
+
+class MLP(torch.nn.Module):
+
+    def __init__(self, num_layers, in_channels, mid_channels, output_channels):
+        super().__init__()
+        self.embedder, embedder_out_dim = get_embedder_nerf(10, input_dims=3, i=0)
+        self.num_layers = num_layers
+        self.layers = torch.nn.ModuleList()
+        self.layers.append(FullyConnectedLayer(in_channels + embedder_out_dim, mid_channels))
+        for idx in range(num_layers):
+            self.layers.append(FullyConnectedLayer(mid_channels, mid_channels, activation='lrelu'))
+        self.layers.append(FullyConnectedLayer(mid_channels, output_channels))
+
+    def forward(self, x, positions):
+        pe = self.embedder(positions)
+        x = torch.cat([x, pe], dim=-1)
+        for fn in self.layers:
+            x = fn(x)
+        return x
 
 
 class MappingNetwork(torch.nn.Module):
