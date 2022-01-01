@@ -129,7 +129,7 @@ class ToRGBLayer(torch.nn.Module):
         self.weight = torch.nn.Parameter(torch.randn([in_channels, in_channels, 1, kernel_size ** 2]))
         self.bias = torch.nn.Parameter(torch.zeros([in_channels]))
         self.weight_gain = 1 / np.sqrt(in_channels * (kernel_size ** 2))
-        self.mlp = MLP(5, in_channels, 512, out_channels)
+        self.mlp = MLP(4, in_channels, 512, out_channels)
 
     def forward(self, x, face_neighborhood, face_is_pad, pad_size, positions, w):
         styles = self.affine(w) * self.weight_gain
