@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import math
 from collections import defaultdict
 from pathlib import Path
 
@@ -109,12 +110,13 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
     def get_image_and_view(self, shape):
         shape_id = int(shape.split('_')[0].split('shape')[1])
+        sampled_view = get_random_views(self.views_per_sample)
         image_selections = self.get_image_selections(shape_id)
         images, masks, cameras = [], [], []
-        for c_i in image_selections:
+        for c_i, c_v in zip(image_selections, sampled_view):
             images.append(self.get_real_image(self.meta_to_pair(c_i)))
             masks.append(self.get_real_mask(self.meta_to_pair(c_i)))
-            perspective_cam = spherical_coord_to_cam(c_i['fov'], c_i['azimuth'], c_i['elevation'])
+            perspective_cam = spherical_coord_to_cam(c_i['fov'], c_v['azimuth'], c_v['elevation'])
             # projection_matrix = intrinsic_to_projection(get_default_perspective_cam()).float()
             projection_matrix = torch.from_numpy(perspective_cam.projection_mat()).float()
             # view_matrix = torch.from_numpy(np.linalg.inv(generate_camera(np.zeros(3), c['azimuth'], c['elevation']))).float()
@@ -250,3 +252,11 @@ def random_grayscale(num_views):
 
 def white(num_views):
     return torch.from_numpy(np.array([1, 1, 1]).reshape((1, 3, 1, 1))).expand(num_views, -1, -1, -1).float()
+
+
+def get_random_views(num_views):
+    elevation_params = [1.407, 0.207, 0.785, 1.767]
+    azimuth = random.sample(np.arange(0, 2 * math.pi).tolist(), num_views)
+    elevation = [min(max(x, elevation_params[2]), elevation_params[3])
+                 for x in np.random.normal(loc=elevation_params[0], scale=elevation_params[1], size=num_views).tolist()]
+    return [{'azimuth': a, 'elevation': e} for a, e in zip(azimuth, elevation)]
