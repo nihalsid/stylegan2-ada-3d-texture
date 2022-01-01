@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch_scatter
 import torchvision.transforms as T
 import trimesh
 from torchvision.io import read_image
@@ -27,6 +28,16 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.target_name = "model_normalized.obj"
         self.views_per_sample = config.views_per_sample
         self.color_generator = random_color if config.random_bg == 'color' else (random_grayscale if config.random_bg == 'grayscale' else white)
+        self.input_feature_extractor, self.num_feats = {
+            "normal": (self.input_normal, 3),
+            "position": (self.input_position, 3),
+            "position+normal": (self.input_position_normal, 6),
+            "normal+laplacian": (self.input_normal_laplacian, 6),
+            "normal+ff1+ff2": (self.input_normal_ff1_ff2, 15),
+            "normal+curvature": (self.input_normal_curvature, 5),
+            "normal+laplacian+ff1+ff2+curvature": (self.input_normal_laplacian_ff1_ff2_curvature, 20),
+        }[config.features]
+        self.stats = torch.load(config.stat_path)
         self.pair_meta, self.all_views = self.load_pair_meta(config.pairmeta_path)
         self.real_images_preloaded, self.masks_preloaded = {}, {}
         if config.preload:
@@ -49,7 +60,6 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         # noinspection PyTypeChecker
         mesh = trimesh.load(self.mesh_directory / selected_item / self.target_name, process=False)
         vertices = torch.from_numpy(mesh.vertices).float()
-        normals = torch.from_numpy(np.array(mesh.face_normals)).float()
         indices = torch.from_numpy(mesh.faces).int()
         tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
         vctr = torch.tensor(list(range(vertices.shape[0]))).long()
@@ -59,7 +69,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
         return {
             "name": selected_item,
-            "x": normals,
+            "x": self.input_feature_extractor(pt_arxiv),
             "y": pt_arxiv['target_colors'].float() * 2,
             "vertex_ctr": vctr,
             "vertices": vertices,
@@ -143,6 +153,14 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         t_image = resize(pad(read_image(str(path)).float() / 127.5 - 1))
         return t_image.unsqueeze(0)
 
+    def export_mesh(self, name, face_colors, output_path):
+        mesh = trimesh.load(self.mesh_directory / name / self.target_name, process=False)
+        vertex_colors = torch.zeros(mesh.vertices.shape).to(face_colors.device)
+        torch_scatter.scatter_mean(face_colors.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 3),
+                                   torch.from_numpy(mesh.faces).to(face_colors.device).reshape(-1).long(), dim=0, out=vertex_colors)
+        out_mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=vertex_colors.cpu().numpy(), process=False)
+        out_mesh.export(output_path)
+
     @staticmethod
     def erode_mask(mask):
         import cv2 as cv
@@ -182,6 +200,36 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     def get_color_bg_real(batch):
         real_sample = batch['real'] * batch['mask'].expand(-1, 3, -1, -1) + (1 - batch['mask']).expand(-1, 3, -1, -1) * batch['bg'][:, :3, :, :]
         return real_sample
+
+    @staticmethod
+    def input_position(pt_arxiv):
+        return pt_arxiv['input_positions']
+
+    @staticmethod
+    def input_normal(pt_arxiv):
+        return pt_arxiv['input_normals']
+
+    @staticmethod
+    def input_position_normal(pt_arxiv):
+        return torch.cat([pt_arxiv['input_positions'], pt_arxiv['input_normals']], dim=1)
+
+    @staticmethod
+    def input_normal_laplacian(pt_arxiv):
+        return torch.cat([pt_arxiv['input_normals'], pt_arxiv['input_laplacian']], dim=1)
+
+    def input_normal_ff1_ff2(self, pt_arxiv):
+        return torch.cat([pt_arxiv['input_normals'], self.normed_feat(pt_arxiv, 'input_ff1'), self.normed_feat(pt_arxiv, 'input_ff2')], dim=1)
+
+    def input_normal_curvature(self, pt_arxiv):
+        return torch.cat([pt_arxiv['input_normals'], self.normed_feat(pt_arxiv, 'input_gcurv').unsqueeze(-1), self.normed_feat(pt_arxiv, 'input_mcurv').unsqueeze(-1)], dim=1)
+
+    def input_normal_laplacian_ff1_ff2_curvature(self, pt_arxiv):
+        return torch.cat([pt_arxiv['input_normals'], pt_arxiv['input_laplacian'], self.normed_feat(pt_arxiv, 'input_ff1'),
+                          self.normed_feat(pt_arxiv, 'input_ff2'), self.normed_feat(pt_arxiv, 'input_gcurv').unsqueeze(-1),
+                          self.normed_feat(pt_arxiv, 'input_mcurv').unsqueeze(-1)], dim=1)
+
+    def normed_feat(self, pt_arxiv, feat):
+        return (pt_arxiv[feat] - self.stats['mean'][feat]) / (self.stats['std'][feat] + 1e-7)
 
 
 def random_color(num_views):

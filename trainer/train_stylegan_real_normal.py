@@ -35,15 +35,15 @@ class StyleGAN2Trainer(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters(config)
         self.config = config
+        self.train_set = FaceGraphMeshDataset(config)
+        self.val_set = FaceGraphMeshDataset(config, config.num_eval_images)
         self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base)
         self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, channel_base=config.d_channel_base)
-        self.E = GraphEncoder(3)
+        self.E = GraphEncoder(self.train_set.num_feats)
         self.R = None
         self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size)
         # print_module_summary(self.G, (torch.zeros(self.config.batch_size, self.config.latent_dim), ))
         # print_module_summary(self.D, (torch.zeros(self.config.batch_size, 3, config.image_size, config.image_size), ))
-        self.train_set = FaceGraphMeshDataset(config)
-        self.val_set = FaceGraphMeshDataset(config, config.num_eval_images)
         self.grid_z = torch.randn(config.num_eval_images, self.config.latent_dim)
 
         self.automatic_optimization = False
@@ -159,7 +159,8 @@ class StyleGAN2Trainer(pl.LightningModule):
     @rank_zero_only
     def validation_epoch_end(self, _val_step_outputs):
         with Timer("export_grid"):
-            odir_real, odir_fake, odir_samples, odir_grid = self.create_directories()
+            odir_real, odir_fake, odir_samples, odir_grid, odir_meshes = self.create_directories()
+            self.export_mesh(odir_meshes)
             self.export_grid("", odir_grid, None)
             self.ema.store(self.G.parameters())
             self.ema.copy_to([p for p in self.G.parameters() if p.requires_grad])
@@ -227,14 +228,27 @@ class StyleGAN2Trainer(pl.LightningModule):
         vis_generated_images = torch.cat(vis_generated_images, dim=0)
         save_image(vis_generated_images, output_dir_vis / f"{prefix}{self.global_step:06d}.png", nrow=int(math.sqrt(vis_generated_images.shape[0])), value_range=(-1, 1), normalize=True)
 
+    def export_mesh(self, outdir):
+        grid_loader = iter(GraphDataLoader(self.train_set, batch_size=self.config.batch_size, shuffle=True))
+        for iter_idx, z in enumerate(self.grid_z.split(self.config.batch_size)):
+            if iter_idx < self.config.num_vis_meshes // self.config.batch_size:
+                z = z.to(self.device)
+                eval_batch = to_device(next(grid_loader), self.device)
+                self.set_shape_codes(eval_batch)
+                generated_colors = torch.clamp(self.G(eval_batch['graph_data'], z, eval_batch['shape'], noise_mode='const'), -1, 1) * 0.5 + 0.5
+                for bidx in range(generated_colors.shape[0] // self.config.num_faces[0]):
+                    self.train_set.export_mesh(eval_batch['name'][bidx],
+                                               generated_colors[self.config.num_faces[0] * bidx: self.config.num_faces[0] * (bidx + 1)], outdir)
+
     def create_directories(self):
         output_dir_fid_real = Path(f'runs/{self.config.experiment}/fid/real')
         output_dir_fid_fake = Path(f'runs/{self.config.experiment}/fid/fake')
         output_dir_samples = Path(f'runs/{self.config.experiment}/images/{self.global_step:06d}')
         output_dir_textures = Path(f'runs/{self.config.experiment}/textures/')
-        for odir in [output_dir_fid_real, output_dir_fid_fake, output_dir_samples, output_dir_textures]:
+        output_dir_meshes = Path(f'runs/{self.config.experiment}/meshes//{self.global_step:06d}')
+        for odir in [output_dir_fid_real, output_dir_fid_fake, output_dir_samples, output_dir_textures, output_dir_meshes]:
             odir.mkdir(exist_ok=True, parents=True)
-        return output_dir_fid_real, output_dir_fid_fake, output_dir_samples, output_dir_textures
+        return output_dir_fid_real, output_dir_fid_fake, output_dir_samples, output_dir_textures, output_dir_meshes
 
     def on_train_start(self):
         if self.ema is None:

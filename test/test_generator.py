@@ -43,7 +43,7 @@ def test_generator_u(config):
     dataset = FaceGraphMeshDataset(config)
     dataloader = GraphDataLoader(dataset, batch_size=batch_size, num_workers=0)
     G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base).cuda()
-    E = GraphEncoder(3).cuda()
+    E = GraphEncoder(dataset.num_feats).cuda()
     print_model_parameter_count(G)
     print_model_parameter_count(E)
     for batch_idx, batch in enumerate(tqdm(dataloader)):

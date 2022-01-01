@@ -15,7 +15,7 @@ df_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/shapenet-chairs-m
 image_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars
 mask_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars_mask
 condition_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold_autoencoder
-
+stat_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres_stat.pt
 mesh_resolution: 64
 
 experiment: fast_dev
@@ -45,6 +45,14 @@ ada_interval: 4
 ada_fixed: False
 g_channel_base: 16384
 d_channel_base: 16384
+features: normal
+#normal
+#position
+#position+normal
+#normal+laplacian
+#normal+ff1+ff2
+#normal+curvature
+#normal+laplacian+ff1+ff2+curvature
 
 random_bg: white
 
@@ -56,6 +64,7 @@ num_faces: [24576, 6144, 1536, 384, 96, 24]
 #num_faces: [1536, 384, 96, 24]
 num_eval_images: 2048
 num_vis_images: 1024
+num_vis_meshes: 64
 batch_size: 16
 views_per_sample: 2
 num_workers: 8
