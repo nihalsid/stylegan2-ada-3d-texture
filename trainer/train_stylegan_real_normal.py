@@ -238,7 +238,7 @@ class StyleGAN2Trainer(pl.LightningModule):
                 generated_colors = torch.clamp(self.G(eval_batch['graph_data'], z, eval_batch['shape'], noise_mode='const'), -1, 1) * 0.5 + 0.5
                 for bidx in range(generated_colors.shape[0] // self.config.num_faces[0]):
                     self.train_set.export_mesh(eval_batch['name'][bidx],
-                                               generated_colors[self.config.num_faces[0] * bidx: self.config.num_faces[0] * (bidx + 1)], outdir)
+                                               generated_colors[self.config.num_faces[0] * bidx: self.config.num_faces[0] * (bidx + 1)], outdir / f"{eval_batch['name'][bidx]}.obj")
 
     def create_directories(self):
         output_dir_fid_real = Path(f'runs/{self.config.experiment}/fid/real')
