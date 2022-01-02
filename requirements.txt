@@ -19,3 +19,5 @@ trimesh
 scipy
 setuptools
 matplotlib
+opencv-python
+scikit-image

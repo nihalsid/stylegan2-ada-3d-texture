@@ -173,6 +173,8 @@ class StyleGAN2Trainer(pl.LightningModule):
                 shape = batch['shape']
                 real_render = batch['real'].cpu()
                 fake_render = self.render(self.G(batch['graph_data'], latents[iter_idx % len(latents)].to(self.device), shape, noise_mode='const'), batch, use_bg_color=False).cpu()
+                real_render = self.train_set.cspace_convert_back(real_render)
+                fake_render = self.train_set.cspace_convert_back(fake_render)
                 save_image(real_render, odir_samples / f"real_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 save_image(fake_render, odir_samples / f"fake_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 for batch_idx in range(real_render.shape[0]):
@@ -220,6 +222,7 @@ class StyleGAN2Trainer(pl.LightningModule):
             eval_batch = to_device(next(grid_loader), self.device)
             self.set_shape_codes(eval_batch)
             fake = self.render(self.G(eval_batch['graph_data'], z, eval_batch['shape'], noise_mode='const'), eval_batch, use_bg_color=False).cpu()
+            fake = self.train_set.cspace_convert_back(fake)
             if output_dir_fid is not None:
                 for batch_idx in range(fake.shape[0]):
                     save_image(fake[batch_idx], output_dir_fid / f"{iter_idx}_{batch_idx}.jpg", value_range=(-1, 1), normalize=True)
@@ -236,7 +239,8 @@ class StyleGAN2Trainer(pl.LightningModule):
                 z = z.to(self.device)
                 eval_batch = to_device(next(grid_loader), self.device)
                 self.set_shape_codes(eval_batch)
-                generated_colors = torch.clamp(self.G(eval_batch['graph_data'], z, eval_batch['shape'], noise_mode='const'), -1, 1) * 0.5 + 0.5
+                generated_colors = torch.clamp(self.G(eval_batch['graph_data'], z, eval_batch['shape'], noise_mode='const'), -1, 1)
+                generated_colors = self.train_set.cspace_convert_back(generated_colors) * 0.5 + 0.5
                 for bidx in range(generated_colors.shape[0] // self.config.num_faces[0]):
                     self.train_set.export_mesh(eval_batch['name'][bidx],
                                                generated_colors[self.config.num_faces[0] * bidx: self.config.num_faces[0] * (bidx + 1)], outdir / f"{eval_batch['name'][bidx]}.obj")

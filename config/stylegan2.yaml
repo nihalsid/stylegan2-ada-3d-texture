@@ -55,6 +55,7 @@ features: normal
 #normal+laplacian+ff1+ff2+curvature
 
 random_bg: white
+colorspace: rgb
 
 image_size: 64
 num_faces: [24576, 6144, 1536, 384, 96, 24]

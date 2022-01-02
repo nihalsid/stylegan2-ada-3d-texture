@@ -12,6 +12,7 @@ import torchvision.transforms as T
 import trimesh
 from torchvision.io import read_image
 from tqdm import tqdm
+from skimage import color
 
 from util.camera import spherical_coord_to_cam
 from util.misc import EasyDict
@@ -29,6 +30,8 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.target_name = "model_normalized.obj"
         self.views_per_sample = config.views_per_sample
         self.color_generator = random_color if config.random_bg == 'color' else (random_grayscale if config.random_bg == 'grayscale' else white)
+        self.cspace_convert = rgb_to_lab if config.colorspace == 'lab' else (lambda x: x)
+        self.cspace_convert_back = lab_to_rgb if config.colorspace == 'lab' else (lambda x: x)
         self.input_feature_extractor, self.num_feats = {
             "normal": (self.input_normal, 3),
             "position": (self.input_position, 3),
@@ -68,10 +71,13 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         real_sample, real_mask, mvp = self.get_image_and_view(selected_item)
         background = self.color_generator(self.views_per_sample)
 
+        real_sample = self.cspace_convert(real_sample)
+        background = self.cspace_convert(background)
+
         return {
             "name": selected_item,
             "x": self.input_feature_extractor(pt_arxiv),
-            "y": pt_arxiv['target_colors'].float() * 2,
+            "y": self.cspace_convert(pt_arxiv['target_colors'].float() * 2),
             "vertex_ctr": vctr,
             "vertices": vertices,
             "indices_quad": indices,
@@ -95,14 +101,6 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             'is_pad': is_pad,
             'level_masks': level_masks
         })
-
-    def visualize_graph_with_predictions(self, name, prediction, output_dir, output_suffix):
-        output_dir = Path(output_dir)
-        output_dir.mkdir(exist_ok=True, parents=True)
-        # noinspection PyTypeChecker
-        mesh = trimesh.load(Path(self.raw_dir, name) / self.target_name, force='mesh', process=False)
-        mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, face_colors=prediction + 0.5, process=False)
-        mesh.export(output_dir / f"{name}_{output_suffix}.obj")
 
     @staticmethod
     def batch_mask(t, graph_data, idx, level=0):
@@ -261,3 +259,33 @@ def get_random_views(num_views):
     elevation = [min(max(x, elevation_params[2]), elevation_params[3])
                  for x in np.random.normal(loc=elevation_params[0], scale=elevation_params[1], size=num_views).tolist()]
     return [{'azimuth': a, 'elevation': e} for a, e in zip(azimuth, elevation)]
+
+
+def rgb_to_lab(rgb_normed):
+    permute = (lambda x: x.permute((0, 2, 3, 1))) if len(rgb_normed.shape) == 4 else (lambda x: x)
+    permute_back = (lambda x: x.permute((0, 3, 1, 2))) if len(rgb_normed.shape) == 4 else (lambda x: x)
+    device = rgb_normed.device
+    rgb_normed = permute(rgb_normed).cpu().numpy()
+    lab_arr = color.rgb2lab(((rgb_normed * 0.5 + 0.5) * 255).astype(np.uint8))
+    lab_arr = torch.from_numpy(lab_arr).float().to(device)
+    lab_arr[..., 0] = lab_arr[..., 0] / 50. - 1
+    lab_arr[..., 1] = lab_arr[..., 1] / 128
+    lab_arr[..., 2] = lab_arr[..., 2] / 128
+    lab_arr = permute_back(lab_arr).contiguous()
+    return lab_arr
+
+
+def lab_to_rgb(lab_normed):
+    permute = (lambda x: x.permute((0, 2, 3, 1))) if len(lab_normed.shape) == 4 else (lambda x: x)
+    permute_back = (lambda x: x.permute((0, 3, 1, 2))) if len(lab_normed.shape) == 4 else (lambda x: x)
+    device = lab_normed.device
+    lab_normed = permute(lab_normed)
+    lab_normed[..., 0] = torch.clamp((lab_normed[..., 0] * 0.5 + 0.5) * 100, 0, 99)
+    lab_normed[..., 1] = torch.clamp(lab_normed[..., 1] * 128, -128, 127)
+    lab_normed[..., 2] = torch.clamp(lab_normed[..., 2] * 128, -128, 127)
+    lab_normed = lab_normed.cpu().numpy()
+    rgb_arr = color.lab2rgb(lab_normed)
+    rgb_arr = torch.from_numpy(rgb_arr).to(device)
+    rgb_arr = permute_back(rgb_arr)
+    rgb_normed = rgb_arr * 2 - 1
+    return rgb_normed
