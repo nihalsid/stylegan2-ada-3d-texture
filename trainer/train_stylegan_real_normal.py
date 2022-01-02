@@ -178,11 +178,12 @@ class StyleGAN2Trainer(pl.LightningModule):
                 for batch_idx in range(real_render.shape[0]):
                     save_image(real_render[batch_idx], odir_real / f"{iter_idx}_{batch_idx}.jpg", value_range=(-1, 1), normalize=True)
         self.ema.restore([p for p in self.G.parameters() if p.requires_grad])
-        fid_score = fid.compute_fid(odir_real, odir_fake, device=self.device)
-        kid_score = fid.compute_kid(odir_real, odir_fake, device=self.device)
+        fid_score = fid.compute_fid(odir_real, odir_fake, device=self.device, num_workers=0)
+        print(f'FID: {fid_score:.3f}')
+        kid_score = fid.compute_kid(odir_real, odir_fake, device=self.device, num_workers=0)
+        print(f'KID: {kid_score:.3f}')
         self.log(f"fid", fid_score, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True, sync_dist=True)
         self.log(f"kid", kid_score, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True, sync_dist=True)
-        print(f'FID: {fid_score:.3f} , KID: {kid_score:.3f}')
         shutil.rmtree(odir_real.parent)
 
     def get_mapped_latent(self, z, style_mixing_prob):
