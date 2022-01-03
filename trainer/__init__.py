@@ -38,7 +38,7 @@ def register_quit_signal_handlers(sig=signal.SIGUSR2, handler=quit_handler):
 
 
 def generate_experiment_name(name, config):
-    if config.resume is not None:
+    if config.resume is not None and not config.create_new_resume:
         experiment = Path(config.resume).parents[1].name
         os.environ['experiment'] = experiment
     elif not os.environ.get('experiment'):

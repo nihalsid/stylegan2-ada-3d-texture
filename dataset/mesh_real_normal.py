@@ -29,7 +29,11 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         if not single_mode:
             self.items = list(x.stem for x in Path(config.dataset_path).iterdir())[:limit_dataset_size]
         else:
-            self.items = [Path(config.dataset_path) / config.shape_id] * config.epoch_steps
+            self.items = [config.shape_id]
+            if limit_dataset_size is None:
+                self.items = self.items * config.epoch_steps
+            else:
+                self.items = self.items * limit_dataset_size
         self.target_name = "model_normalized.obj"
         self.views_per_sample = config.views_per_sample
         self.color_generator = random_color if config.random_bg == 'color' else (random_grayscale if config.random_bg == 'grayscale' else white)

@@ -75,6 +75,11 @@ df_size: 0.0625
 df_mean: 0.2839
 df_std: 0.0686
 
+shape_id: shape02344_rank02_pair183269
+epoch_steps: 320
+
+create_new_resume: False
+
 wandb_main: False
 suffix: ''
 
