@@ -259,13 +259,13 @@ class StyleGAN2Trainer(pl.LightningModule):
         if self.ema is None:
             self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
         if self.R is None:
-            self.R = DifferentiableRenderer(self.config.image_size, "bounds")
+            self.R = DifferentiableRenderer(self.config.image_size, "bounds", self.config.colorspace)
 
     def on_validation_start(self):
         if self.ema is None:
             self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
         if self.R is None:
-            self.R = DifferentiableRenderer(self.config.image_size, "bounds")
+            self.R = DifferentiableRenderer(self.config.image_size, "bounds", self.config.colorspace)
 
 
 def step(opt, module):

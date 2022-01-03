@@ -37,7 +37,7 @@ def test_dataloader(config):
 def test_view_angles_together(config):
     dataset = FaceGraphMeshDataset(config)
     dataloader = GraphDataLoader(dataset, batch_size=8, num_workers=0)
-    render_helper = DifferentiableRenderer(config.image_size, 'bounds').cuda()
+    render_helper = DifferentiableRenderer(config.image_size, 'bounds', config.colorspace).cuda()
     Path("runs/images_compare").mkdir(exist_ok=True)
     for batch_idx, batch in enumerate(tqdm(dataloader)):
         batch = to_device(batch, torch.device("cuda:0"))

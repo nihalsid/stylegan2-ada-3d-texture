@@ -20,13 +20,16 @@ from util.misc import EasyDict
 
 class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
-    def __init__(self, config, limit_dataset_size=None):
+    def __init__(self, config, limit_dataset_size=None, single_mode=False):
         self.dataset_directory = Path(config.dataset_path)
         self.mesh_directory = Path(config.mesh_path)
         self.image_size = config.image_size
         self.real_images = {x.name.split('.')[0]: x for x in Path(config.image_path).iterdir() if x.name.endswith('.jpg') or x.name.endswith('.png')}
         self.masks = {x: Path(config.mask_path) / self.real_images[x].name for x in self.real_images}
-        self.items = list(x.stem for x in Path(config.dataset_path).iterdir())[:limit_dataset_size]
+        if not single_mode:
+            self.items = list(x.stem for x in Path(config.dataset_path).iterdir())[:limit_dataset_size]
+        else:
+            self.items = [Path(config.dataset_path) / config.shape_id] * config.epoch_steps
         self.target_name = "model_normalized.obj"
         self.views_per_sample = config.views_per_sample
         self.color_generator = random_color if config.random_bg == 'color' else (random_grayscale if config.random_bg == 'grayscale' else white)

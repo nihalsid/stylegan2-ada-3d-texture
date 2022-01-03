@@ -32,14 +32,18 @@ def render(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ranges, backg
     return color[:, :, :, :-1]
 
 
-def render_in_bounds(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ranges, background=None):
+def render_in_bounds(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ranges, color_space, background=None):
     render_resolution = int(resolution * 1.2)
     rast_out, _ = dr.rasterize(glctx, pos_clip, pos_idx, resolution=[render_resolution, render_resolution], ranges=ranges)
     color, _ = dr.interpolate(vtx_col[None, ...], rast_out, col_idx)
     color = dr.antialias(color, rast_out, pos_clip, pos_idx)
     mask = color[..., -1:] == 0
     if background is None:
-        one_tensor = torch.ones((color.shape[0], color.shape[3], 1, 1), device=color.device)
+        if color_space == 'rgb':
+            one_tensor = torch.ones((color.shape[0], color.shape[3], 1, 1), device=color.device)
+        else:
+            one_tensor = torch.zeros((color.shape[0], color.shape[3], 1, 1), device=color.device)
+            one_tensor[:, 0, :, :] = 1
     else:
         one_tensor = background
     one_tensor_permuted = one_tensor.permute((0, 2, 3, 1)).contiguous()
@@ -87,16 +91,17 @@ def intrinsic_to_projection(intrinsic_matrix):
 
 class DifferentiableRenderer(nn.Module):
 
-    def __init__(self, resolution, mode='standard'):
+    def __init__(self, resolution, mode='standard', color_space='rgb'):
         super().__init__()
         self.glctx = dr.RasterizeGLContext()
         self.resolution = resolution
         self.render_func = render
+        self.color_space = color_space
         if mode == 'bounds':
             self.render_func = render_in_bounds
 
     def render(self, vertex_positions, triface_indices, vertex_colors, ranges=None, background=None):
         if ranges is None:
             ranges = torch.tensor([[0, triface_indices.shape[0]]]).int()
-        color = self.render_func(self.glctx, vertex_positions, triface_indices, vertex_colors, triface_indices, self.resolution, ranges, background)
+        color = self.render_func(self.glctx, vertex_positions, triface_indices, vertex_colors, triface_indices, self.resolution, ranges, self.color_space, background)
         return color
