@@ -71,7 +71,7 @@ def rotate2d_inv(theta, device=torch.device("cpu")):
 
 class AugmentPipe(torch.nn.Module):
 
-    def __init__(self, start_p, target, interval, fixed, batch_size):
+    def __init__(self, start_p, target, interval, fixed, batch_size, num_views, colorspace):
         super().__init__()
 
         self.register_buffer('p', torch.ones([1]).float() * start_p)  # Overall multiplier for augmentation probability.
@@ -79,14 +79,16 @@ class AugmentPipe(torch.nn.Module):
 
         self.ada_target = target
         self.batch_size = batch_size
+        self.num_views = num_views
         self.ada_interval = interval
         self.ada_kimg = 500
+        self.colorspace = colorspace
 
         # Pixel blitting.
         self.xflip = 1.  # Probability multiplier for x-flip.
-        self.rotate90 = 1.  # Probability multiplier for 90 degree rotations.
+        self.rotate90 = 0.25  # Probability multiplier for 90 degree rotations.
         self.xint = 1.  # Probability multiplier for integer translation.
-        self.xint_max = 0.125  # Range of integer translation, relative to image dimensions.
+        self.xint_max = 0.0625  # Range of integer translation, relative to image dimensions.
 
         # General geometric transformations.
         self.scale = 1.  # Probability multiplier for isotropic scaling.
@@ -94,16 +96,16 @@ class AugmentPipe(torch.nn.Module):
         self.aniso = 1.  # Probability multiplier for anisotropic scaling.
         self.xfrac = 0.75  # Probability multiplier for fractional translation.
         self.scale_std = 0.2  # Log2 standard deviation of isotropic scaling.
-        self.rotate_max = 1.  # Range of arbitrary rotation, 1 = full circle.
+        self.rotate_max = 0.25  # Range of arbitrary rotation, 1 = full circle.
         self.aniso_std = 0.2  # Log2 standard deviation of anisotropic scaling.
         self.xfrac_std = 0.125  # Standard deviation of frational translation, relative to image dimensions.
 
         # Color transformations.
-        self.brightness = 1.  # Probability multiplier for brightness.
-        self.contrast = 1.  # Probability multiplier for contrast.
-        self.lumaflip = 0.5  # Probability multiplier for luma flip.
-        self.hue = 1.  # Probability multiplier for hue rotation.
-        self.saturation = 1.  # Probability multiplier for saturation.
+        self.brightness = 1. if colorspace == 'rgb' else 0  # Probability multiplier for brightness.
+        self.contrast = 1. if colorspace == 'rgb' else 0  # Probability multiplier for contrast.
+        self.lumaflip = 0.5 if colorspace == 'rgb' else 0  # Probability multiplier for luma flip.
+        self.hue = 1. if colorspace == 'rgb' else 0  # Probability multiplier for hue rotation.
+        self.saturation = 1. if colorspace == 'rgb' else 0  # Probability multiplier for saturation.
         self.brightness_std = 0.2  # Standard deviation of brightness.
         self.contrast_std = 0.5  # Log2 standard deviation of contrast.
         self.hue_max = 1  # Range of hue rotation, 1 = full circle.
@@ -197,7 +199,7 @@ class AugmentPipe(torch.nn.Module):
 
             # Execute transformation.
             grid = torch.nn.functional.affine_grid(theta=G_inv[:, :2, :], size=images.shape, align_corners=False)
-            images = torch.nn.functional.grid_sample(images, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
+            images = torch.nn.functional.grid_sample(images, grid, mode='bilinear', padding_mode='border', align_corners=False)
 
             # Downsample and crop.
             images = self.downsampler(images)
@@ -209,33 +211,41 @@ class AugmentPipe(torch.nn.Module):
 
         # Apply brightness with probability (brightness * strength).
         if self.brightness > 0:
-            b = torch.randn([batch_size], device=device) * self.brightness_std
-            b = torch.where(torch.rand([batch_size], device=device) < self.brightness * self.p, b, torch.zeros_like(b))
-            C = translate3d(b, b, b, device=device) @ C
+            b = torch.randn([batch_size // self.num_views], device=device) * self.brightness_std
+            b = torch.where(torch.rand([batch_size // self.num_views], device=device) < self.brightness * self.p, b, torch.zeros_like(b))
+            b = b.unsqueeze(-1).expand(-1, self.num_views).reshape(batch_size)
+            b_ = b if self.colorspace == 'rgb' else 0
+            C = translate3d(b, b_, b_, device=device) @ C
 
         # Apply contrast with probability (contrast * strength).
         if self.contrast > 0:
-            c = torch.exp2(torch.randn([batch_size], device=device) * self.contrast_std)
-            c = torch.where(torch.rand([batch_size], device=device) < self.contrast * self.p, c, torch.ones_like(c))
-            C = scale3d(c, c, c, device=device) @ C
+            c = torch.exp2(torch.randn([batch_size // self.num_views], device=device) * self.contrast_std)
+            c = torch.where(torch.rand([batch_size // self.num_views], device=device) < self.contrast * self.p, c, torch.ones_like(c))
+            c = c.unsqueeze(-1).expand(-1, self.num_views).reshape(batch_size)
+            c_ = c if self.colorspace == 'rgb' else 0
+            C = scale3d(c, c_, c_, device=device) @ C
 
         # Apply luma flip with probability (lumaflip * strength).
         v = torch.tensor([1 / np.sqrt(3), 1 / np.sqrt(3), 1 / np.sqrt(3), 0], device=device).float()  # Luma axis.
+
         if self.lumaflip > 0:
-            i = torch.floor(torch.rand([batch_size, 1, 1], device=device) * 2)
-            i = torch.where(torch.rand([batch_size, 1, 1], device=device) < self.lumaflip * self.p, i, torch.zeros_like(i))
+            i = torch.floor(torch.rand([batch_size // self.num_views, 1, 1], device=device) * 2)
+            i = torch.where(torch.rand([batch_size // self.num_views, 1, 1], device=device) < self.lumaflip * self.p, i, torch.zeros_like(i))
+            i = i.unsqueeze(1).expand(-1, self.num_views, -1, -1).reshape((batch_size, 1, 1))
             C = (I_4 - 2 * v.ger(v) * i) @ C  # Householder reflection.
 
         # Apply hue rotation with probability (hue * strength).
         if self.hue > 0 and num_channels > 1:
-            theta = (torch.rand([batch_size], device=device) * 2 - 1) * np.pi * self.hue_max
-            theta = torch.where(torch.rand([batch_size], device=device) < self.hue * self.p, theta, torch.zeros_like(theta))
+            theta = (torch.rand([batch_size // self.num_views], device=device) * 2 - 1) * np.pi * self.hue_max
+            theta = torch.where(torch.rand([batch_size // self.num_views], device=device) < self.hue * self.p, theta, torch.zeros_like(theta))
+            theta = theta.unsqueeze(-1).expand(-1, self.num_views).reshape(batch_size)
             C = rotate3d(v, theta, device=device) @ C  # Rotate around v.
 
         # Apply saturation with probability (saturation * strength).
         if self.saturation > 0 and num_channels > 1:
-            s = torch.exp2(torch.randn([batch_size, 1, 1], device=device) * self.saturation_std)
-            s = torch.where(torch.rand([batch_size, 1, 1], device=device) < self.saturation * self.p, s, torch.ones_like(s))
+            s = torch.exp2(torch.randn([batch_size // self.num_views, 1, 1], device=device) * self.saturation_std)
+            s = torch.where(torch.rand([batch_size // self.num_views, 1, 1], device=device) < self.saturation * self.p, s, torch.ones_like(s))
+            s = s.unsqueeze(1).expand(-1, self.num_views, -1, -1).reshape((batch_size, 1, 1))
             C = (v.ger(v) + (I_4 - v.ger(v)) * s) @ C
 
         # Execute color transformations.

@@ -7,6 +7,7 @@ import torch
 
 from dataset.mesh_real_normal import FaceGraphMeshDataset
 from dataset import GraphDataLoader, to_device, to_vertex_colors_scatter
+from model.augment import AugmentPipe
 from model.differentiable_renderer import DifferentiableRenderer
 from model.graph import pool, unpool
 
@@ -38,10 +39,11 @@ def test_view_angles_together(config):
     dataset = FaceGraphMeshDataset(config)
     dataloader = GraphDataLoader(dataset, batch_size=8, num_workers=0)
     render_helper = DifferentiableRenderer(config.image_size, 'bounds', config.colorspace).cuda()
+    augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size, config.views_per_sample, config.colorspace).cuda()
     Path("runs/images_compare").mkdir(exist_ok=True)
     for batch_idx, batch in enumerate(tqdm(dataloader)):
         batch = to_device(batch, torch.device("cuda:0"))
-        batch['real'] = dataset.get_color_bg_real(batch)
+        batch['real'] = augment_pipe(dataset.get_color_bg_real(batch))
         rendered_color_gt = render_helper.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(batch["y"], batch), batch["ranges"].cpu(), batch['bg']).permute((0, 3, 1, 2))
         batch['real'] = dataset.cspace_convert_back(batch['real'])
         rendered_color_gt = dataset.cspace_convert_back(rendered_color_gt)

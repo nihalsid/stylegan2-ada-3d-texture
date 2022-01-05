@@ -60,6 +60,8 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         selected_item = self.items[idx]
         pt_arxiv = torch.load(os.path.join(self.dataset_directory, f'{selected_item}.pt'))
+        vertices = pt_arxiv['vertices'].float()
+        indices = pt_arxiv['indices'].int()
         edge_index = pt_arxiv['conv_data'][0][0].long()
         num_sub_vertices = [pt_arxiv['conv_data'][i][0].shape[0] for i in range(1, len(pt_arxiv['conv_data']))]
         pad_sizes = [pt_arxiv['conv_data'][i][2].shape[0] for i in range(len(pt_arxiv['conv_data']))]
@@ -69,16 +71,12 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         level_masks = [torch.zeros(pt_arxiv['conv_data'][i][0].shape[0]).long() for i in range(len(pt_arxiv['conv_data']))]
 
         # noinspection PyTypeChecker
-        mesh = trimesh.load(self.mesh_directory / selected_item / self.target_name, process=False)
-        vertices = torch.from_numpy(mesh.vertices).float()
-        indices = torch.from_numpy(mesh.faces).int()
         tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
         vctr = torch.tensor(list(range(vertices.shape[0]))).long()
 
         real_sample, real_mask, mvp = self.get_image_and_view(selected_item)
         background = self.color_generator(self.views_per_sample)
 
-        real_sample = self.cspace_convert(real_sample)
         background = self.cspace_convert(background)
 
         return {
@@ -159,7 +157,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         resize = T.Resize(size=(self.image_size, self.image_size))
         pad = T.Pad(padding=(100, 100), fill=1)
         t_image = resize(pad(read_image(str(path)).float() / 127.5 - 1))
-        return t_image.unsqueeze(0)
+        return self.cspace_convert(t_image.unsqueeze(0))
 
     def export_mesh(self, name, face_colors, output_path):
         mesh = trimesh.load(self.mesh_directory / name / self.target_name, process=False)
