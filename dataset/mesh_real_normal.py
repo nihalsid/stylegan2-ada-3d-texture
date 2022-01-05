@@ -274,8 +274,8 @@ def rgb_to_lab(rgb_normed):
     lab_arr = color.rgb2lab(((rgb_normed * 0.5 + 0.5) * 255).astype(np.uint8))
     lab_arr = torch.from_numpy(lab_arr).float().to(device)
     lab_arr[..., 0] = lab_arr[..., 0] / 50. - 1
-    lab_arr[..., 1] = lab_arr[..., 1] / 128
-    lab_arr[..., 2] = lab_arr[..., 2] / 128
+    lab_arr[..., 1] = lab_arr[..., 1] / 100
+    lab_arr[..., 2] = lab_arr[..., 2] / 100
     lab_arr = permute_back(lab_arr).contiguous()
     return lab_arr
 
@@ -286,8 +286,8 @@ def lab_to_rgb(lab_normed):
     device = lab_normed.device
     lab_normed = permute(lab_normed)
     lab_normed[..., 0] = torch.clamp((lab_normed[..., 0] * 0.5 + 0.5) * 100, 0, 99)
-    lab_normed[..., 1] = torch.clamp(lab_normed[..., 1] * 128, -128, 127)
-    lab_normed[..., 2] = torch.clamp(lab_normed[..., 2] * 128, -128, 127)
+    lab_normed[..., 1] = torch.clamp(lab_normed[..., 1] * 100, -100, 100)
+    lab_normed[..., 2] = torch.clamp(lab_normed[..., 2] * 100, -100, 100)
     lab_normed = lab_normed.cpu().numpy()
     rgb_arr = color.lab2rgb(lab_normed)
     rgb_arr = torch.from_numpy(rgb_arr).to(device)

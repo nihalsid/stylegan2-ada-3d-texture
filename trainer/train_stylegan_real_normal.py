@@ -160,11 +160,11 @@ class StyleGAN2Trainer(pl.LightningModule):
     def validation_epoch_end(self, _val_step_outputs):
         with Timer("export_grid"):
             odir_real, odir_fake, odir_samples, odir_grid, odir_meshes = self.create_directories()
-            self.export_mesh(odir_meshes)
             self.export_grid("", odir_grid, None)
             self.ema.store(self.G.parameters())
             self.ema.copy_to([p for p in self.G.parameters() if p.requires_grad])
             self.export_grid("ema_", odir_grid, odir_fake)
+            self.export_mesh(odir_meshes)
         with Timer("export_samples"):
             latents = self.grid_z.split(self.config.batch_size)
             for iter_idx, batch in enumerate(self.val_dataloader()):
