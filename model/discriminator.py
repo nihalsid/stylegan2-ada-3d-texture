@@ -6,7 +6,7 @@ from model import SmoothDownsample, EqualizedConv2d, FullyConnectedLayer, normal
 
 class Discriminator(torch.nn.Module):
 
-    def __init__(self, img_resolution, img_channels, w_num_layers=0, c_dim=0, channel_base=16384, channel_max=512):
+    def __init__(self, img_resolution, img_channels, w_num_layers=0, c_dim=0, mbstd_on=1, channel_base=16384, channel_max=512):
         super().__init__()
         self.img_resolution = img_resolution
         self.img_resolution_log2 = int(np.log2(img_resolution))
@@ -19,7 +19,7 @@ class Discriminator(torch.nn.Module):
             in_channels = channels_dict[res]
             out_channels = channels_dict[res // 2]
             self.module_list.append(DiscriminatorBlock(in_channels, out_channels))
-        self.module_list.append(DiscriminatorEpilogue(channels_dict[4], resolution=4, cmap_dim=(0 if c_dim == 0 else channels_dict[4])))
+        self.module_list.append(DiscriminatorEpilogue(channels_dict[4], resolution=4, cmap_dim=(0 if c_dim == 0 else channels_dict[4]), mbstd_num_channels=mbstd_on))
         self.module_list = torch.nn.ModuleList(self.module_list)
         if c_dim > 0:
             self.mapping = DiscriminatorMappingNetwork(c_dim=c_dim, cmap_dim=channels_dict[4], num_layers=w_num_layers)

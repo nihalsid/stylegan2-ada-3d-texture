@@ -47,6 +47,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "normal+ff1+ff2": (self.input_normal_ff1_ff2, 15),
             "normal+curvature": (self.input_normal_curvature, 5),
             "normal+laplacian+ff1+ff2+curvature": (self.input_normal_laplacian_ff1_ff2_curvature, 20),
+            "semantics": (self.input_semantics, 7),
         }[config.features]
         self.stats = torch.load(config.stat_path)
         self.pair_meta, self.all_views = self.load_pair_meta(config.pairmeta_path)
@@ -233,6 +234,10 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         return torch.cat([pt_arxiv['input_normals'], pt_arxiv['input_laplacian'], self.normed_feat(pt_arxiv, 'input_ff1'),
                           self.normed_feat(pt_arxiv, 'input_ff2'), self.normed_feat(pt_arxiv, 'input_gcurv').unsqueeze(-1),
                           self.normed_feat(pt_arxiv, 'input_mcurv').unsqueeze(-1)], dim=1)
+
+    @staticmethod
+    def input_semantics(pt_arxiv):
+        return torch.nn.functional.one_hot(pt_arxiv['semantics'].long(), num_classes=7).float()
 
     def normed_feat(self, pt_arxiv, feat):
         return (pt_arxiv[feat] - self.stats['mean'][feat]) / (self.stats['std'][feat] + 1e-7)

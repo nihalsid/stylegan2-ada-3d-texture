@@ -10,7 +10,7 @@ from torch_ema import ExponentialMovingAverage
 from torchvision.utils import save_image
 from cleanfid import fid
 
-from dataset.mesh_real_normal import FaceGraphMeshDataset
+from dataset.mesh_real_features import FaceGraphMeshDataset
 from dataset import to_vertex_colors_scatter, GraphDataLoader, to_device
 from model.augment import AugmentPipe
 from model.differentiable_renderer import DifferentiableRenderer
@@ -38,7 +38,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.train_set = FaceGraphMeshDataset(config)
         self.val_set = FaceGraphMeshDataset(config, config.num_eval_images)
         self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base)
-        self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, channel_base=config.d_channel_base)
+        self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
         self.E = GraphEncoder(self.train_set.num_feats)
         self.R = None
         self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size, config.views_per_sample, config.colorspace)

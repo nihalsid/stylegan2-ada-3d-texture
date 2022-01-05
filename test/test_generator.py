@@ -4,7 +4,7 @@ from tqdm import tqdm
 import hydra
 
 from dataset import GraphDataLoader, to_device
-from dataset.mesh_real_normal import FaceGraphMeshDataset
+from dataset.mesh_real_features import FaceGraphMeshDataset
 from model import modulated_conv2d
 from model.graph_generator import Generator
 from model.graph import modulated_face_conv, GraphEncoder
