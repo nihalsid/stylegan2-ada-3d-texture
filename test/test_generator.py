@@ -65,6 +65,40 @@ def test_generator_u(config):
         break
 
 
+@hydra.main(config_path='../config', config_name='stylegan2')
+def test_generator_u2(config):
+    from model.graph_generator_u2 import Generator
+    from dataset.mesh_real_2features import FaceGraphMeshDataset
+    batch_size = 2
+    dataset = FaceGraphMeshDataset(config)
+    dataloader = GraphDataLoader(dataset, batch_size=batch_size, num_workers=0)
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base).cuda()
+    layer_dims = (32, 64, 64, 96, 128, 128, 192, 192)
+    E = GraphEncoder(dataset.num_feats_0, layer_dims=layer_dims).cuda()
+    S = GraphEncoder(dataset.num_feats_1, layer_dims=layer_dims).cuda()
+    print_model_parameter_count(G)
+    print_model_parameter_count(E)
+    print_model_parameter_count(S)
+    for batch_idx, batch in enumerate(tqdm(dataloader)):
+        # sanity test forward pass
+        batch = to_device(batch, torch.device("cuda:0"))
+        shape = E(batch['x_0'], batch['graph_data'])
+        semantics = S(batch['x_1'], batch['graph_data'])
+        z = torch.randn(batch_size, 512).to(torch.device("cuda:0"))
+        w = G.mapping(z)
+        t0 = time.time()
+        fake = G.synthesis(batch['graph_data'], w, shape, semantics)
+        print('Time for fake:', time.time() - t0, ', shape:', fake.shape)
+        # sanity test backwards
+        loss = torch.abs(fake - torch.rand_like(fake)).mean()
+        t0 = time.time()
+        loss.backward()
+        print('Time for backwards:', time.time() - t0)
+        print('backwards done')
+        print_module_summary(G.synthesis, [batch['graph_data'], w, shape, semantics])
+        break
+
+
 def test_modulated_face_conv():
     x_2d = torch.randn(4, 3, 16, 16)
     w_2d = torch.rand(8, 3, 3, 3)

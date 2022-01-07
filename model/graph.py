@@ -122,20 +122,20 @@ class SymmetricFaceConv(torch.nn.Module):
 
 class GraphEncoder(torch.nn.Module):
 
-    def __init__(self, in_channels, conv_layer=FaceConv, norm=torch_geometric.nn.BatchNorm):
+    def __init__(self, in_channels, layer_dims=(32, 64, 64, 128, 128, 128, 256, 256), conv_layer=FaceConv, norm=torch_geometric.nn.BatchNorm):
 
         super().__init__()
         self.activation = torch.nn.LeakyReLU()
-        self.enc_conv_in = torch.nn.Linear(in_channels, 32)
-        self.down_0_block_0 = FResNetBlock(32, 64, conv_layer, norm, self.activation)
-        self.down_0_block_1 = FResNetBlock(64, 64, conv_layer, norm, self.activation)
-        self.down_1_block_0 = FResNetBlock(64, 128, conv_layer, norm, self.activation)
-        self.down_2_block_0 = FResNetBlock(128, 128, conv_layer, norm, self.activation)
-        self.down_3_block_0 = FResNetBlock(128, 128, conv_layer, norm, self.activation)
-        self.down_4_block_0 = FResNetBlock(128, 256, conv_layer, norm, self.activation)
-        self.enc_mid_block_0 = FResNetBlock(256, 256, conv_layer, norm, self.activation)
-        self.enc_out_conv = conv_layer(256, 256)
-        self.enc_out_norm = norm(256)
+        self.enc_conv_in = torch.nn.Linear(in_channels, layer_dims[0])
+        self.down_0_block_0 = FResNetBlock(layer_dims[0], layer_dims[1], conv_layer, norm, self.activation)
+        self.down_0_block_1 = FResNetBlock(layer_dims[1], layer_dims[2], conv_layer, norm, self.activation)  #
+        self.down_1_block_0 = FResNetBlock(layer_dims[2], layer_dims[3], conv_layer, norm, self.activation)  #
+        self.down_2_block_0 = FResNetBlock(layer_dims[3], layer_dims[4], conv_layer, norm, self.activation)  #
+        self.down_3_block_0 = FResNetBlock(layer_dims[4], layer_dims[5], conv_layer, norm, self.activation)  #
+        self.down_4_block_0 = FResNetBlock(layer_dims[5], layer_dims[6], conv_layer, norm, self.activation)  #
+        self.enc_mid_block_0 = FResNetBlock(layer_dims[6], layer_dims[7], conv_layer, norm, self.activation)
+        self.enc_out_conv = conv_layer(layer_dims[7], layer_dims[7])  #
+        self.enc_out_norm = norm(layer_dims[7])
 
     def forward(self, x, graph_data):
         level_feats = []
