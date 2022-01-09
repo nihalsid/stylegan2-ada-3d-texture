@@ -45,6 +45,9 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "position+normal": (self.input_position_normal, 6),
             "normal+laplacian": (self.input_normal_laplacian, 6),
             "normal+ff1+ff2": (self.input_normal_ff1_ff2, 15),
+            "ff2": (self.input_ff2, ),
+            "curvature": (self.input_curvature,),
+            "laplacian": (self.input_laplacian,),
             "normal+curvature": (self.input_normal_curvature, 5),
             "normal+laplacian+ff1+ff2+curvature": (self.input_normal_laplacian_ff1_ff2_curvature, 20),
             "semantics": (self.input_semantics, 7),
@@ -226,6 +229,16 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
     def input_normal_ff1_ff2(self, pt_arxiv):
         return torch.cat([pt_arxiv['input_normals'], self.normed_feat(pt_arxiv, 'input_ff1'), self.normed_feat(pt_arxiv, 'input_ff2')], dim=1)
+
+    def input_ff2(self, pt_arxiv):
+        return self.normed_feat(pt_arxiv, 'input_ff2')
+
+    def input_curvature(self, pt_arxiv):
+        return torch.cat([self.normed_feat(pt_arxiv, 'input_gcurv').unsqueeze(-1), self.normed_feat(pt_arxiv, 'input_mcurv').unsqueeze(-1)], dim=1)
+
+    @staticmethod
+    def input_laplacian(pt_arxiv):
+        return pt_arxiv['input_laplacian']
 
     def input_normal_curvature(self, pt_arxiv):
         return torch.cat([pt_arxiv['input_normals'], self.normed_feat(pt_arxiv, 'input_gcurv').unsqueeze(-1), self.normed_feat(pt_arxiv, 'input_mcurv').unsqueeze(-1)], dim=1)
