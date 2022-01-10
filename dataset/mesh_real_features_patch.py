@@ -24,6 +24,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.dataset_directory = Path(config.dataset_path)
         self.mesh_directory = Path(config.mesh_path)
         self.image_size = config.image_size
+        self.image_size_hres = config.image_size_hres
         self.real_images = {x.name.split('.')[0]: x for x in Path(config.image_path).iterdir() if x.name.endswith('.jpg') or x.name.endswith('.png')}
         self.masks = {x: Path(config.mask_path) / self.real_images[x].name for x in self.real_images}
         if not single_mode:
@@ -54,7 +55,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         }[config.features]
         self.stats = torch.load(config.stat_path)
         self.pair_meta, self.all_views = self.load_pair_meta(config.pairmeta_path)
-        self.real_images_preloaded, self.masks_preloaded = {}, {}
+        self.real_images_preloaded, self.real_images_hres_preloaded, self.masks_preloaded, self.masks_hres_preloaded = {}, {}, {}, {}
         if config.preload:
             self.preload_real_images()
 
@@ -78,7 +79,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
         vctr = torch.tensor(list(range(vertices.shape[0]))).long()
 
-        real_sample, real_mask, mvp = self.get_image_and_view(selected_item)
+        real_sample, real_sample_hres, real_mask, real_mask_hres, mvp = self.get_image_and_view(selected_item)
         background = self.color_generator(self.views_per_sample)
 
         background = self.cspace_convert(background)
@@ -92,7 +93,9 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "indices_quad": indices,
             "mvp": mvp,
             "real": real_sample,
+            "real_hres": real_sample_hres,
             "mask": real_mask,
+            "mask_hres": real_mask_hres,
             "bg": torch.cat([background, torch.ones([background.shape[0], 1, 1, 1])], dim=1),
             "indices": tri_indices,
             "ranges": torch.tensor([0, tri_indices.shape[0]]).int(),
@@ -120,10 +123,14 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         # sampled_view = get_random_views(self.views_per_sample)
         sampled_view = random.sample(self.all_views, self.views_per_sample)
         image_selections = self.get_image_selections(shape_id)
-        images, masks, cameras = [], [], []
+        images, images_hres, masks, masks_hres, cameras = [], [], [], [], []
         for c_i, c_v in zip(image_selections, sampled_view):
-            images.append(self.get_real_image(self.meta_to_pair(c_i)))
-            masks.append(self.get_real_mask(self.meta_to_pair(c_i)))
+            im, im_hres = self.get_real_image(self.meta_to_pair(c_i))
+            images.append(im)
+            images_hres.append(im_hres)
+            ms, ms_hres = self.get_real_mask(self.meta_to_pair(c_i))
+            masks.append(ms)
+            masks_hres.append(ms_hres)
             perspective_cam = spherical_coord_to_cam(c_i['fov'], c_v['azimuth'], c_v['elevation'])
             # projection_matrix = intrinsic_to_projection(get_default_perspective_cam()).float()
             projection_matrix = torch.from_numpy(perspective_cam.projection_mat()).float()
@@ -132,20 +139,22 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             cameras.append(torch.matmul(projection_matrix, view_matrix))
         image = torch.cat(images, dim=0)
         mask = torch.cat(masks, dim=0)
+        images_hres = torch.cat(images_hres, dim=0)
+        masks_hres = torch.cat(masks_hres, dim=0)
         mvp = torch.stack(cameras, dim=0)
-        return image, mask, mvp
+        return image, images_hres, mask, masks_hres, mvp
 
     def get_real_image(self, name):
         if name not in self.real_images_preloaded.keys():
             return self.process_real_image(self.real_images[name])
         else:
-            return self.real_images_preloaded[name]
+            return self.real_images_preloaded[name], self.real_images_hres_preloaded[name]
 
     def get_real_mask(self, name):
         if name not in self.masks_preloaded.keys():
             return self.process_real_mask(self.masks[name])
         else:
-            return self.masks_preloaded[name]
+            return self.masks_preloaded[name], self.masks_hres_preloaded[name]
 
     def get_image_selections(self, shape_id):
         candidates = self.pair_meta[shape_id]
@@ -159,9 +168,11 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
     def process_real_image(self, path):
         resize = T.Resize(size=(self.image_size, self.image_size))
+        resize_hres = T.Resize(size=(self.image_size_hres, self.image_size_hres))
         pad = T.Pad(padding=(100, 100), fill=1)
-        t_image = resize(pad(read_image(str(path)).float() / 127.5 - 1))
-        return self.cspace_convert(t_image.unsqueeze(0))
+        padded = pad(read_image(str(path)).float() / 127.5 - 1)
+        t_image, t_image_hres = resize(padded), resize_hres(padded)
+        return self.cspace_convert(t_image.unsqueeze(0)), self.cspace_convert(t_image_hres.unsqueeze(0))
 
     def export_mesh(self, name, face_colors, output_path):
         mesh = trimesh.load(self.mesh_directory / name / self.target_name, process=False)
@@ -182,10 +193,11 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
     def process_real_mask(self, path):
         resize = T.Resize(size=(self.image_size, self.image_size))
+        resize_hres = T.Resize(size=(self.image_size_hres, self.image_size_hres))
         pad = T.Pad(padding=(100, 100), fill=0)
-        eroded_mask = self.erode_mask(read_image(str(path)))
-        t_mask = resize(pad((eroded_mask > 0).float()))
-        return t_mask.unsqueeze(0)
+        eroded_mask_pad = pad((self.erode_mask(read_image(str(path))) > 0).float())
+        t_mask, t_mask_hres = resize(eroded_mask_pad), resize_hres(eroded_mask_pad)
+        return t_mask.unsqueeze(0), t_mask_hres.unsqueeze(0)
 
     def load_pair_meta(self, pairmeta_path):
         loaded_json = json.loads(Path(pairmeta_path).read_text())
@@ -199,8 +211,8 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
     def preload_real_images(self):
         for ri in tqdm(self.real_images.keys(), desc='preload'):
-            self.real_images_preloaded[ri] = self.process_real_image(self.real_images[ri])
-            self.masks_preloaded[ri] = self.process_real_mask(self.masks[ri])
+            self.real_images_preloaded[ri], self.real_images_hres_preloaded[ri] = self.process_real_image(self.real_images[ri])
+            self.masks_preloaded[ri], self.masks_hres_preloaded[ri] = self.process_real_mask(self.masks[ri])
 
     @staticmethod
     def meta_to_pair(c):
@@ -209,6 +221,11 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     @staticmethod
     def get_color_bg_real(batch):
         real_sample = batch['real'] * batch['mask'].expand(-1, 3, -1, -1) + (1 - batch['mask']).expand(-1, 3, -1, -1) * batch['bg'][:, :3, :, :]
+        return real_sample
+
+    @staticmethod
+    def get_color_bg_real_hres(batch):
+        real_sample = batch['real_hres'] * batch['mask_hres'].expand(-1, 3, -1, -1) + (1 - batch['mask_hres']).expand(-1, 3, -1, -1) * batch['bg'][:, :3, :, :]
         return real_sample
 
     @staticmethod

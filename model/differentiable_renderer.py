@@ -47,7 +47,8 @@ def render_in_bounds(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ran
     else:
         one_tensor = background
     one_tensor_permuted = one_tensor.permute((0, 2, 3, 1)).contiguous()
-    color = torch.where(mask, one_tensor_permuted, color)[:, :, :, :-1]
+    color = torch.where(mask, one_tensor_permuted, color)  # [:, :, :, :-1]
+    color[..., -1:] = mask.float()
     color_crops = []
     boxes = masks_to_boxes(torch.logical_not(mask.squeeze(-1)))
     for img_idx in range(color.shape[0]):
@@ -69,7 +70,8 @@ def render_in_bounds(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ran
         for i in range(4):
             pad[i // 2][i % 2] += additional_pad
 
-        padded = torch.ones((color_crop.shape[0], color_crop.shape[1] + pad[1][0] + pad[1][1], color_crop.shape[2] + pad[0][0] + pad[0][1]), device=color_crop.device) * one_tensor[img_idx, :3, :, :]
+        padded = torch.ones((color_crop.shape[0], color_crop.shape[1] + pad[1][0] + pad[1][1], color_crop.shape[2] + pad[0][0] + pad[0][1]), device=color_crop.device)
+        padded[:3, :, :] = padded[:3, :, :] * one_tensor[img_idx, :3, :, :]
         padded[:, pad[1][0]: padded.shape[1] - pad[1][1], pad[0][0]: padded.shape[2] - pad[0][1]] = color_crop
         # color_crop = T.Pad((pad[0][0], pad[1][0], pad[0][1], pad[1][1]), 1)(color_crop)
         color_crop = torch.nn.functional.interpolate(padded.unsqueeze(0), size=(resolution, resolution), mode='bilinear', align_corners=False).permute((0, 2, 3, 1))
@@ -91,17 +93,20 @@ def intrinsic_to_projection(intrinsic_matrix):
 
 class DifferentiableRenderer(nn.Module):
 
-    def __init__(self, resolution, mode='standard', color_space='rgb'):
+    def __init__(self, resolution, mode='standard', color_space='rgb', num_channels=3):
         super().__init__()
         self.glctx = dr.RasterizeGLContext()
         self.resolution = resolution
         self.render_func = render
         self.color_space = color_space
+        self.num_channels = num_channels
         if mode == 'bounds':
             self.render_func = render_in_bounds
 
-    def render(self, vertex_positions, triface_indices, vertex_colors, ranges=None, background=None):
+    def render(self, vertex_positions, triface_indices, vertex_colors, ranges=None, background=None, resolution=None):
         if ranges is None:
             ranges = torch.tensor([[0, triface_indices.shape[0]]]).int()
-        color = self.render_func(self.glctx, vertex_positions, triface_indices, vertex_colors, triface_indices, self.resolution, ranges, self.color_space, background)
-        return color
+        if resolution is None:
+            resolution = self.resolution
+        color = self.render_func(self.glctx, vertex_positions, triface_indices, vertex_colors, triface_indices, resolution, ranges, self.color_space, background)
+        return color[:, :, :, :self.num_channels]

@@ -80,6 +80,10 @@ epoch_steps: 320
 
 mbstd_on: 1
 
+num_patch_per_view: 4
+patch_size: 64
+image_size_hres: 512
+
 create_new_resume: False
 
 wandb_main: False
