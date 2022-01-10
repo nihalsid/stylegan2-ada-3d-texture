@@ -166,7 +166,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     def erode_mask(mask):
         import cv2 as cv
         mask = mask.squeeze(0).numpy().astype(np.uint8)
-        kernel_size = 2
+        kernel_size = 3
         element = cv.getStructuringElement(cv.MORPH_ELLIPSE, (2 * kernel_size + 1, 2 * kernel_size + 1), (kernel_size, kernel_size))
         mask = cv.erode(mask, element)
         return torch.from_numpy(mask).unsqueeze(0)

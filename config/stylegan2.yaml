@@ -39,6 +39,7 @@ latent_dim: 512
 condition_dim: 512
 lambda_gp: 1
 lambda_plp: 2
+lambda_patch: 1
 ada_start_p: 0.  #to disable set to -1
 ada_target: 0.6
 ada_interval: 4
@@ -57,7 +58,11 @@ features: normal
 random_bg: white
 colorspace: rgb
 
-image_size: 64
+image_size: 128
+num_patch_per_view: 4
+patch_size: 64
+image_size_hres: 512
+
 num_faces: [24576, 6144, 1536, 384, 96, 24]
 #image_size: 32
 #num_faces: [1024, 256, 64, 16]
@@ -79,10 +84,6 @@ shape_id: shape02344_rank02_pair183269
 epoch_steps: 320
 
 mbstd_on: 1
-
-num_patch_per_view: 4
-patch_size: 64
-image_size_hres: 512
 
 create_new_resume: False
 
