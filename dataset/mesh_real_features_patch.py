@@ -27,6 +27,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.image_size_hres = config.image_size_hres
         self.real_images = {x.name.split('.')[0]: x for x in Path(config.image_path).iterdir() if x.name.endswith('.jpg') or x.name.endswith('.png')}
         self.masks = {x: Path(config.mask_path) / self.real_images[x].name for x in self.real_images}
+        self.erode = config.erode
         if not single_mode:
             self.items = list(x.stem for x in Path(config.dataset_path).iterdir())[:limit_dataset_size]
         else:
@@ -195,7 +196,10 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         resize = T.Resize(size=(self.image_size, self.image_size))
         resize_hres = T.Resize(size=(self.image_size_hres, self.image_size_hres))
         pad = T.Pad(padding=(100, 100), fill=0)
-        eroded_mask_pad = pad((self.erode_mask(read_image(str(path))) > 0).float())
+        if self.erode:
+            eroded_mask_pad = pad((self.erode_mask(read_image(str(path))) > 0).float())
+        else:
+            eroded_mask_pad = pad((read_image(str(path)) > 0).float())
         t_mask, t_mask_hres = resize(eroded_mask_pad), resize_hres(eroded_mask_pad)
         return t_mask.unsqueeze(0), t_mask_hres.unsqueeze(0)
 
@@ -293,11 +297,18 @@ def white(num_views):
     return torch.from_numpy(np.array([1, 1, 1]).reshape((1, 3, 1, 1))).expand(num_views, -1, -1, -1).float()
 
 
-def get_random_views(num_views):
+def get_semi_random_views(num_views):
     elevation_params = [1.407, 0.207, 0.785, 1.767]
     azimuth = random.sample(np.arange(0, 2 * math.pi).tolist(), num_views)
     elevation = [min(max(x, elevation_params[2]), elevation_params[3])
                  for x in np.random.normal(loc=elevation_params[0], scale=elevation_params[1], size=num_views).tolist()]
+    return [{'azimuth': a, 'elevation': e} for a, e in zip(azimuth, elevation)]
+
+
+def get_random_views(num_views):
+    elevation_params = [1.407, 0.207, 0.785, 1.767]
+    azimuth = random.sample(np.arange(0, 2 * math.pi).tolist(), num_views)
+    elevation = np.random.uniform(low=elevation_params[2], high=elevation_params[3], size=num_views).tolist()
     return [{'azimuth': a, 'elevation': e} for a, e in zip(azimuth, elevation)]
 
 

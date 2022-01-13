@@ -62,6 +62,7 @@ image_size: 128
 num_patch_per_view: 4
 patch_size: 64
 image_size_hres: 512
+erode: True
 
 num_faces: [24576, 6144, 1536, 384, 96, 24]
 #image_size: 32
