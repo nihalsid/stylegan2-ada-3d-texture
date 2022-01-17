@@ -73,6 +73,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         pad_sizes = [pt_arxiv['conv_data'][i][2].shape[0] for i in range(len(pt_arxiv['conv_data']))]
         sub_edges = [pt_arxiv['conv_data'][i][0].long() for i in range(1, len(pt_arxiv['conv_data']))]
         pool_maps = pt_arxiv['pool_locations']
+        lateral_maps = pt_arxiv['lateral_maps']
         is_pad = [pt_arxiv['conv_data'][i][4].bool() for i in range(len(pt_arxiv['conv_data']))]
         level_masks = [torch.zeros(pt_arxiv['conv_data'][i][0].shape[0]).long() for i in range(len(pt_arxiv['conv_data']))]
 
@@ -98,17 +99,18 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "bg": torch.cat([background, torch.ones([background.shape[0], 1, 1, 1])], dim=1),
             "indices": tri_indices,
             "ranges": torch.tensor([0, tri_indices.shape[0]]).int(),
-            "graph_data": self.get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, is_pad, level_masks)
+            "graph_data": self.get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, lateral_maps, is_pad, level_masks)
         }
 
     @staticmethod
-    def get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, is_pad, level_masks):
+    def get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, lateral_maps, is_pad, level_masks):
         return EasyDict({
             'face_neighborhood': edge_index,
             'sub_neighborhoods': sub_edges,
             'pads': pad_sizes,
             'node_counts': num_sub_vertices,
             'pool_maps': pool_maps,
+            'lateral_maps': lateral_maps,
             'is_pad': is_pad,
             'level_masks': level_masks
         })

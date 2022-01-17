@@ -108,7 +108,7 @@ class Collater(object):
             return batch
         elif isinstance(elem, EasyDict):
             if 'face_neighborhood' in elem:  # face conv data
-                face_neighborhood, sub_neighborhoods, pads, node_counts, pool_maps, is_pad, level_masks = [], [], [], [], [], [], []
+                face_neighborhood, sub_neighborhoods, pads, node_counts, pool_maps, lateral_maps, is_pad, level_masks = [], [], [], [], [], [], [], []
                 pad_sum = 0
 
                 for b_i in range(len(batch)):
@@ -129,16 +129,19 @@ class Collater(object):
                 for sub_i in range(len(elem.sub_neighborhoods)):
                     sub_n = []
                     pool_n = []
+                    lateral_n = []
                     node_count_n = 0
                     pad_sum = 0
                     for b_i in range(len(batch)):
                         sub_n.append(batch[b_i].sub_neighborhoods[sub_i] + pad_sum)
                         pool_n.append(batch[b_i].pool_maps[sub_i] + node_count_n)
+                        lateral_n.append(batch[b_i].lateral_maps[sub_i] + node_count_n)
                         pad_sum += batch[b_i].is_pad[sub_i + 1].shape[0]
                         node_count_n += batch[b_i].node_counts[sub_i]
                     sub_neighborhoods.append(self.cat_collate(sub_n))
                     node_counts.append(node_count_n)
                     pool_maps.append(self.cat_collate(pool_n))
+                    lateral_maps.append(self.cat_collate(lateral_n))
 
                 batch_dot_dict = {
                     'face_neighborhood': self.cat_collate(face_neighborhood),
@@ -146,6 +149,7 @@ class Collater(object):
                     'pads': pads,
                     'node_counts': node_counts,
                     'pool_maps': pool_maps,
+                    'lateral_maps': lateral_maps,
                     'is_pad': is_pad,
                     'level_masks': level_masks
                 }
