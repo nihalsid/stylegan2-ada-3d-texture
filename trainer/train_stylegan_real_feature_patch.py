@@ -39,8 +39,8 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.train_set = FaceGraphMeshDataset(config)
         self.val_set = FaceGraphMeshDataset(config, config.num_eval_images)
         self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base)
-        self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
-        self.patch_D = Discriminator(config.patch_size, 3 * config.views_per_sample * config.num_patch_per_view, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
+        self.D = Discriminator(config.image_size, 4, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
+        self.patch_D = Discriminator(config.patch_size, 4 * config.views_per_sample * config.num_patch_per_view, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
         self.E = GraphEncoder(self.train_set.num_feats)
         self.R = None
         self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size, config.views_per_sample, config.colorspace)
@@ -74,11 +74,14 @@ class StyleGAN2Trainer(pl.LightningModule):
 
         fake_render = self.render(fake, batch)
 
-        d_input = torch.nn.functional.interpolate(fake_render[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
+        d_input_image = torch.nn.functional.interpolate(fake_render[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
+        d_input_mask = torch.nn.functional.interpolate(fake_render[:, 3:4, :, :], size=(self.config.image_size, self.config.image_size), mode='nearest')
+        d_input = torch.cat([d_input_image, d_input_mask], 1)
         p_fake = self.D(self.augment_pipe(d_input))
         gen_loss = torch.nn.functional.softplus(-p_fake).mean()
 
-        d_patch_input = self.extract_patches_from_tensor(fake_render[:, :3, :, :], 1 - fake_render[:, 3, :, :], self.config.num_patch_per_view, self.config.patch_size)
+        d_patch_input_image, d_patch_input_mask = self.extract_patches_from_tensor(fake_render[:, :3, :, :], 1 - fake_render[:, 3, :, :], self.config.num_patch_per_view, self.config.patch_size)
+        d_patch_input = torch.cat([d_patch_input_image, d_patch_input_mask], 2)
         d_patch_input = d_patch_input.reshape(batch['real'].shape[0] // self.config.views_per_sample, -1, self.config.patch_size, self.config.patch_size)
         p_fake_patch = self.patch_D(d_patch_input)
         gen_loss_patch = torch.nn.functional.softplus(-p_fake_patch).mean()
@@ -98,7 +101,9 @@ class StyleGAN2Trainer(pl.LightningModule):
         g_opt.zero_grad(set_to_none=True)
         fake, w = self.forward(batch)
         fake_render = self.render(fake, batch)
-        resized_fake_render = torch.nn.functional.interpolate(fake_render[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
+        resized_fake_render_image = torch.nn.functional.interpolate(fake_render[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
+        resized_fake_render_mask = torch.nn.functional.interpolate(fake_render[:, 3:4, :, :], size=(self.config.image_size, self.config.image_size), mode='nearest')
+        resized_fake_render = torch.cat([resized_fake_render_image, resized_fake_render_mask], 1)
         plp = self.path_length_penalty(resized_fake_render, w)
         if not torch.isnan(plp):
             gen_loss = self.config.lambda_plp * plp * self.config.lazy_path_penalty_interval
@@ -112,12 +117,14 @@ class StyleGAN2Trainer(pl.LightningModule):
 
         fake, _ = self.forward(batch)
         fake_render = self.render(fake.detach(), batch)
-        d_input = torch.nn.functional.interpolate(fake_render[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
+        d_input_image = torch.nn.functional.interpolate(fake_render[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
+        d_input_mask = torch.nn.functional.interpolate(fake_render[:, 3:4, :, :], size=(self.config.image_size, self.config.image_size), mode='nearest')
+        d_input = torch.cat([d_input_image, d_input_mask], 1)
         p_fake = self.D(self.augment_pipe(d_input))
         fake_loss = torch.nn.functional.softplus(p_fake).mean()
         self.manual_backward(fake_loss)
 
-        p_real = self.D(self.augment_pipe(self.train_set.get_color_bg_real(batch)))
+        p_real = self.D(self.augment_pipe(torch.cat([self.train_set.get_color_bg_real(batch), batch['mask']], 1)))
         self.augment_pipe.accumulate_real_sign(p_real.sign().detach())
 
         # Get discriminator loss
@@ -137,7 +144,8 @@ class StyleGAN2Trainer(pl.LightningModule):
 
         fake, _ = self.forward(batch)
         fake_render = self.render(fake.detach(), batch)
-        d_patch_input = self.extract_patches_from_tensor(fake_render[:, :3, :, :], 1 - fake_render[:, 3, :, :], self.config.num_patch_per_view, self.config.patch_size)
+        d_patch_input_image, d_patch_input_mask = self.extract_patches_from_tensor(fake_render[:, :3, :, :], 1 - fake_render[:, 3, :, :], self.config.num_patch_per_view, self.config.patch_size)
+        d_patch_input = torch.cat([d_patch_input_image, d_patch_input_mask], 2)
         d_patch_input = d_patch_input.reshape(batch['real'].shape[0] // self.config.views_per_sample, -1, self.config.patch_size, self.config.patch_size)
 
         p_fake = self.patch_D(d_patch_input)
@@ -146,7 +154,8 @@ class StyleGAN2Trainer(pl.LightningModule):
 
         real = self.train_set.get_color_bg_real_hres(batch)
         first_views = list(range(0, real.shape[0], self.config.views_per_sample))
-        real_patch = self.extract_patches_from_tensor(real[first_views], batch['mask_hres'][first_views, 0, :, :], self.config.num_patch_per_view * self.config.views_per_sample, self.config.patch_size)
+        real_patch_image, real_patch_mask = self.extract_patches_from_tensor(real[first_views], batch['mask_hres'][first_views, 0, :, :], self.config.num_patch_per_view * self.config.views_per_sample, self.config.patch_size)
+        real_patch = torch.cat([real_patch_image, real_patch_mask], 2)
         real_patch = real_patch.reshape(real.shape[0] // self.config.views_per_sample, -1, self.config.patch_size, self.config.patch_size)
 
         p_real = self.patch_D(real_patch)
@@ -166,6 +175,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         d_opt = self.optimizers()[1]
         d_opt.zero_grad(set_to_none=True)
         image = self.train_set.get_color_bg_real(batch)
+        image = torch.cat([image, batch['mask']], 1)
         image.requires_grad_()
         p_real = self.D(self.augment_pipe(image, True))
         gp = compute_gradient_penalty(image, p_real)
@@ -180,7 +190,8 @@ class StyleGAN2Trainer(pl.LightningModule):
         image = self.train_set.get_color_bg_real_hres(batch)
         image.requires_grad_()
         first_views = list(range(0, image.shape[0], self.config.views_per_sample))
-        patch = self.extract_patches_from_tensor(image[first_views], batch['mask_hres'][first_views, 0, :, :], self.config.num_patch_per_view * self.config.views_per_sample, self.config.patch_size)
+        patch_image, patch_mask = self.extract_patches_from_tensor(image[first_views], batch['mask_hres'][first_views, 0, :, :], self.config.num_patch_per_view * self.config.views_per_sample, self.config.patch_size)
+        patch = torch.cat([patch_image, patch_mask], 2)
         real_patch = patch.reshape(image.shape[0] // self.config.views_per_sample, -1, self.config.patch_size, self.config.patch_size)
         p_real = self.patch_D(real_patch)
         gp = compute_gradient_penalty(image, p_real)
@@ -339,7 +350,7 @@ class StyleGAN2Trainer(pl.LightningModule):
 
     @staticmethod
     def extract_patches_from_tensor(t_image, mask, patches_per_view, patch_size):
-        patches = []
+        patches, patch_masks = [], []
         for idx in range(t_image.shape[0]):
             nonzero_y, nonzero_x = torch.nonzero(mask[idx] > 0, as_tuple=True)
             y_min, y_max = nonzero_y.min(), nonzero_y.max()
@@ -356,9 +367,12 @@ class StyleGAN2Trainer(pl.LightningModule):
                 y_low, y_high = y[p] - patch_size // 2, y[p] + patch_size // 2
                 x_low, x_high = x[p] - patch_size // 2, x[p] + patch_size // 2
                 patch = t_image[idx, :, y_low: y_high, x_low: x_high]
+                msk = mask[idx, y_low: y_high, x_low: x_high]
                 patches.append(patch.unsqueeze(0))
+                patch_masks.append(msk.unsqueeze(0).unsqueeze(0))
         patches = torch.cat(patches, dim=0).reshape((t_image.shape[0], patches_per_view, 3, patch_size, patch_size))
-        return patches
+        patch_masks = torch.cat(patch_masks, dim=0).reshape((t_image.shape[0], patches_per_view, 1, patch_size, patch_size))
+        return patches, patch_masks
 
 
 def step(opt, module):
