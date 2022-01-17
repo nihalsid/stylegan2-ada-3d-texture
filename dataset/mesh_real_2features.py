@@ -24,6 +24,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.dataset_directory = Path(config.dataset_path)
         self.mesh_directory = Path(config.mesh_path)
         self.image_size = config.image_size
+        self.random_views = config.random_views
         self.real_images = {x.name.split('.')[0]: x for x in Path(config.image_path).iterdir() if x.name.endswith('.jpg') or x.name.endswith('.png')}
         self.masks = {x: Path(config.mask_path) / self.real_images[x].name for x in self.real_images}
         self.erode = config.erode
@@ -109,8 +110,10 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
     def get_image_and_view(self, shape):
         shape_id = int(shape.split('_')[0].split('shape')[1])
-        # sampled_view = get_random_views(self.views_per_sample)
-        sampled_view = random.sample(self.all_views, self.views_per_sample)
+        if self.random_views:
+            sampled_view = get_random_views(self.views_per_sample)
+        else:
+            sampled_view = random.sample(self.all_views, self.views_per_sample)
         image_selections = self.get_image_selections(shape_id)
         images, masks, cameras = [], [], []
         for c_i, c_v in zip(image_selections, sampled_view):

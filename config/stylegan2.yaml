@@ -74,6 +74,7 @@ num_vis_images: 1024
 num_vis_meshes: 64
 batch_size: 16
 views_per_sample: 2
+random_views: False
 num_workers: 8
 
 df_trunc: 0.3125
