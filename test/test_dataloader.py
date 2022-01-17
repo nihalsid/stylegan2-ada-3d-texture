@@ -10,6 +10,7 @@ from dataset import GraphDataLoader, to_device, to_vertex_colors_scatter
 from model.augment import AugmentPipe
 from model.differentiable_renderer import DifferentiableRenderer
 from model.graph import pool, unpool
+from util.misc import boxblur_mask_k_k
 
 
 @hydra.main(config_path='../config', config_name='stylegan2')
@@ -36,6 +37,7 @@ def test_dataloader(config):
 
 @hydra.main(config_path='../config', config_name='stylegan2')
 def test_view_angles_together(config):
+    import torchvision
     from dataset.mesh_real_features_patch import FaceGraphMeshDataset
     dataset = FaceGraphMeshDataset(config)
     dataloader = GraphDataLoader(dataset, batch_size=8, num_workers=0)
@@ -49,6 +51,7 @@ def test_view_angles_together(config):
         rendered_color_gt_image = rendered_color_gt[:, :3, :, :]
         real_image = dataset.cspace_convert_back(real[:, :3, :, :])
         real_mask = real[:, 3:4, :, :]
+        # real_mask = boxblur_mask_k_k(real_mask, 21)
         rendered_color_gt_image = dataset.cspace_convert_back(rendered_color_gt_image)
         save_image(torch.cat([real_image, real_mask.expand(-1, 3, -1, -1), rendered_color_gt_image]), f"runs/images_compare/test_view_{batch_idx:04d}.png", nrow=4, value_range=(-1, 1), normalize=True)
 

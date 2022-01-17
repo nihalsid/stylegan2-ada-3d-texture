@@ -20,6 +20,7 @@ from model.graph_generator_u import Generator
 from model.discriminator import Discriminator
 from model.loss import PathLengthPenalty, compute_gradient_penalty
 from trainer import create_trainer
+from util.misc import boxblur_mask_k_k
 from util.timer import Timer
 
 import torch.multiprocessing
@@ -75,7 +76,9 @@ class StyleGAN2Trainer(pl.LightningModule):
         fake_render = self.render(fake, batch)
 
         d_input_image = torch.nn.functional.interpolate(fake_render[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
-        d_input_mask = torch.nn.functional.interpolate(fake_render[:, 3:4, :, :], size=(self.config.image_size, self.config.image_size), mode='nearest')
+        d_input_mask = 1 - torch.nn.functional.interpolate(fake_render[:, 3:4, :, :], size=(self.config.image_size, self.config.image_size), mode='nearest')
+        if self.config.blur_mask:
+            d_input_mask = boxblur_mask_k_k(d_input_mask, 21)
         d_input = torch.cat([d_input_image, d_input_mask], 1)
         p_fake = self.D(self.augment_pipe(d_input))
         gen_loss = torch.nn.functional.softplus(-p_fake).mean()
@@ -102,7 +105,9 @@ class StyleGAN2Trainer(pl.LightningModule):
         fake, w = self.forward(batch)
         fake_render = self.render(fake, batch)
         resized_fake_render_image = torch.nn.functional.interpolate(fake_render[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
-        resized_fake_render_mask = torch.nn.functional.interpolate(fake_render[:, 3:4, :, :], size=(self.config.image_size, self.config.image_size), mode='nearest')
+        resized_fake_render_mask = 1 - torch.nn.functional.interpolate(fake_render[:, 3:4, :, :], size=(self.config.image_size, self.config.image_size), mode='nearest')
+        if self.config.blur_mask:
+            resized_fake_render_mask = boxblur_mask_k_k(resized_fake_render_mask, 21)
         resized_fake_render = torch.cat([resized_fake_render_image, resized_fake_render_mask], 1)
         plp = self.path_length_penalty(resized_fake_render, w)
         if not torch.isnan(plp):
@@ -118,13 +123,18 @@ class StyleGAN2Trainer(pl.LightningModule):
         fake, _ = self.forward(batch)
         fake_render = self.render(fake.detach(), batch)
         d_input_image = torch.nn.functional.interpolate(fake_render[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
-        d_input_mask = torch.nn.functional.interpolate(fake_render[:, 3:4, :, :], size=(self.config.image_size, self.config.image_size), mode='nearest')
+        d_input_mask = 1 - torch.nn.functional.interpolate(fake_render[:, 3:4, :, :], size=(self.config.image_size, self.config.image_size), mode='nearest')
+        if self.config.blur_mask:
+            d_input_mask = boxblur_mask_k_k(d_input_mask, 21)
         d_input = torch.cat([d_input_image, d_input_mask], 1)
         p_fake = self.D(self.augment_pipe(d_input))
         fake_loss = torch.nn.functional.softplus(p_fake).mean()
         self.manual_backward(fake_loss)
 
-        p_real = self.D(self.augment_pipe(torch.cat([self.train_set.get_color_bg_real(batch), batch['mask']], 1)))
+        d_input_mask = batch['mask']
+        if self.config.blur_mask:
+            d_input_mask = boxblur_mask_k_k(d_input_mask, 21)
+        p_real = self.D(self.augment_pipe(torch.cat([self.train_set.get_color_bg_real(batch), d_input_mask], 1)))
         self.augment_pipe.accumulate_real_sign(p_real.sign().detach())
 
         # Get discriminator loss
@@ -175,7 +185,10 @@ class StyleGAN2Trainer(pl.LightningModule):
         d_opt = self.optimizers()[1]
         d_opt.zero_grad(set_to_none=True)
         image = self.train_set.get_color_bg_real(batch)
-        image = torch.cat([image, batch['mask']], 1)
+        d_input_mask = batch['mask']
+        if self.config.blur_mask:
+            d_input_mask = boxblur_mask_k_k(d_input_mask, 21)
+        image = torch.cat([image, d_input_mask], 1)
         image.requires_grad_()
         p_real = self.D(self.augment_pipe(image, True))
         gp = compute_gradient_penalty(image, p_real)

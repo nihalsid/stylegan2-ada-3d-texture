@@ -100,3 +100,8 @@ class EasyDict(dict):
 
 def to_point_list(s):
     return np.concatenate([c[:, np.newaxis] for c in np.where(s)], axis=1)
+
+
+def boxblur_mask_k_k(t_input, k):
+    weight = torch.ones([1, 1, k, k], device=t_input.device) / (k * k)
+    return torch.nn.functional.conv2d(t_input, weight, padding=k//2)

@@ -76,6 +76,7 @@ batch_size: 16
 views_per_sample: 2
 random_views: False
 num_workers: 8
+blur_mask: False
 
 df_trunc: 0.3125
 df_size: 0.0625
