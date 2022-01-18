@@ -108,7 +108,8 @@ class SynthesisBlock(torch.nn.Module):
         self.num_torgb = 0
         self.resampler = SmoothUpsample()
         if self.semantic_channels > 0:
-            self.conv_pre = SemanticLayer(in_channels - current_geo_channels, self.semantic_channels)
+            self.conv_pre = SemanticLayer(in_channels=in_channels - current_geo_channels,
+                                          semantic_channels=self.semantic_channels, w_dim=w_dim)
         self.conv0 = SynthesisLayer(in_channels, out_channels, w_dim=w_dim, num_face=num_face, resampler=self.resampler)
         self.conv1 = SynthesisLayer(out_channels, out_channels - next_geo_channels, w_dim=w_dim, num_face=num_face)
         self.torgb = ToRGBLayer(out_channels - next_geo_channels, color_channels, w_dim=w_dim, num_face=num_face)
@@ -117,7 +118,7 @@ class SynthesisBlock(torch.nn.Module):
     def forward(self, face_neighborhood, face_is_pad, pad_size, pool_map, x, img, ws, shape, semantics, noise_mode):
         w_iter = iter(ws.unbind(dim=1))
         if self.semantic_channels > 0:
-            x = self.conv_pre(x, face_neighborhood, face_is_pad, pad_size, semantics)
+            x = self.conv_pre(x, face_neighborhood, face_is_pad, pad_size, semantics, ws[:, 0, :])
 
         x = torch.cat([x, shape], dim=1)
         x = self.conv0(x, face_neighborhood, face_is_pad, pad_size, pool_map[0], next(w_iter), noise_mode=noise_mode)
@@ -188,25 +189,26 @@ class SynthesisLayer(torch.nn.Module):
 
 class SemanticLayer(torch.nn.Module):
 
-    def __init__(self, in_channels, semantic_channels, kernel_size=3, activation='lrelu'):
+    def __init__(self, in_channels, semantic_channels, w_dim, kernel_size=3, activation='lrelu'):
         super().__init__()
         self.kernel_size = kernel_size
         self.semantic_channels = semantic_channels
         self.in_channels = in_channels
+        self.affine = FullyConnectedLayer(w_dim, in_channels * 2, bias_init=1)
         self.activation = activation_funcs[activation]['fn']
         self.activation_gain = activation_funcs[activation]['def_gain']
         self.weight = torch.nn.Parameter(torch.randn([in_channels, in_channels * 2, 1, kernel_size ** 2]))
         self.bias = torch.nn.Parameter(torch.zeros([in_channels]))
 
-    def forward(self, x, face_neighborhood, face_is_pad, pad_size, semantic_map, gain=1):
+    def forward(self, x, face_neighborhood, face_is_pad, pad_size, semantic_map, w, gain=1):
+        styles = self.affine(w)
         pooled_semantics = torch.zeros((self.semantic_channels, self.in_channels), device=x.device)
         scatter_mean(x, semantic_map, dim=0, out=pooled_semantics)
         x_semantics = pooled_semantics[semantic_map, :]
         x = torch.cat([x, x_semantics], 1)
         x = create_faceconv_input(x, self.kernel_size ** 2, face_neighborhood[0], face_is_pad[0], pad_size[0])
-        x = torch.nn.functional.conv2d(x, self.weight).squeeze(-1).squeeze(-1)
+        x = modulated_face_conv(x=x, weight=self.weight, styles=styles)
         return clamp_gain(self.activation(x + self.bias[None, :]), self.activation_gain * gain, 256 * gain)
-
 
 
 class MappingNetwork(torch.nn.Module):
