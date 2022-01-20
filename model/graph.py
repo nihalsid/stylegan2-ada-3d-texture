@@ -91,6 +91,23 @@ class FaceConv(torch.nn.Module):
         return self.conv(create_faceconv_input(x, self.neighborhood_size + 1, face_neighborhood, face_is_pad, pad_size)).squeeze(-1).squeeze(-1)
 
 
+class FaceConvDemodulated(torch.nn.Module):
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.kernel_size = 3
+        self.weight = torch.nn.Parameter(torch.randn([out_channels, in_channels, 1, self.kernel_size ** 2]))
+        self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
+
+    def forward(self, x, face_neighborhood, face_is_pad, pad_size):
+        w = self.weight
+        dcoefs = (w.square().sum(dim=[1, 2, 3]) + 1e-8).rsqrt()
+        w = w * dcoefs.reshape(-1, 1, 1, 1)
+        x = create_faceconv_input(x, self.kernel_size ** 2, face_neighborhood, face_is_pad, pad_size)
+        x = torch.nn.functional.conv2d(x, w).squeeze(-1).squeeze(-1) + self.bias
+        return x
+
+
 class SymmetricFaceConv(torch.nn.Module):
 
     def __init__(self, in_channels, out_channels):
