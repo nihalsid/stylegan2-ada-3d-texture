@@ -203,6 +203,7 @@ class Collater(object):
                     retdict[key] = self.cat_collate([d[key] for d in batch])
                 elif key == 'vertices':
                     retdict[key] = self.cat_collate([transform_pos_mvp(d['vertices'], d['mvp']) for d in batch])
+                    retdict['view_vector'] = self.cat_collate([(d['vertices'].unsqueeze(0).expand(d['cam_position'].shape[0], -1, -1) - d['cam_position'].unsqueeze(1).expand(-1, d['vertices'].shape[0], -1)).reshape(-1, 3) for d in batch])
                 elif key == 'indices':
                     num_vertex = 0
                     indices = []

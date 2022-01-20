@@ -81,7 +81,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
         vctr = torch.tensor(list(range(vertices.shape[0]))).long()
 
-        real_sample, real_mask, mvp = self.get_image_and_view(selected_item)
+        real_sample, real_mask, mvp, cam_positions = self.get_image_and_view(selected_item)
         background = self.color_generator(self.views_per_sample)
 
         background = self.cspace_convert(background)
@@ -94,6 +94,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "vertices": vertices,
             "indices_quad": indices,
             "mvp": mvp,
+            "cam_position": cam_positions,
             "real": real_sample,
             "mask": real_mask,
             "bg": torch.cat([background, torch.ones([background.shape[0], 1, 1, 1])], dim=1),
@@ -126,7 +127,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         else:
             sampled_view = random.sample(self.all_views, self.views_per_sample)
         image_selections = self.get_image_selections(shape_id)
-        images, masks, cameras = [], [], []
+        images, masks, cameras, cam_positions = [], [], [], []
         for c_i, c_v in zip(image_selections, sampled_view):
             images.append(self.get_real_image(self.meta_to_pair(c_i)))
             masks.append(self.get_real_mask(self.meta_to_pair(c_i)))
@@ -134,12 +135,15 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             # projection_matrix = intrinsic_to_projection(get_default_perspective_cam()).float()
             projection_matrix = torch.from_numpy(perspective_cam.projection_mat()).float()
             # view_matrix = torch.from_numpy(np.linalg.inv(generate_camera(np.zeros(3), c['azimuth'], c['elevation']))).float()
+            cam_position = torch.from_numpy(np.linalg.inv(perspective_cam.view_mat())[:3, 3]).float()
             view_matrix = torch.from_numpy(perspective_cam.view_mat()).float()
             cameras.append(torch.matmul(projection_matrix, view_matrix))
+            cam_positions.append(cam_position)
         image = torch.cat(images, dim=0)
         mask = torch.cat(masks, dim=0)
         mvp = torch.stack(cameras, dim=0)
-        return image, mask, mvp
+        cam_positions = torch.stack(cam_positions, dim=0)
+        return image, mask, mvp, cam_positions
 
     def get_real_image(self, name):
         if name not in self.real_images_preloaded.keys():
@@ -170,12 +174,15 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         return self.cspace_convert(t_image.unsqueeze(0))
 
     def export_mesh(self, name, face_colors, output_path):
-        mesh = trimesh.load(self.mesh_directory / name / self.target_name, process=False)
-        vertex_colors = torch.zeros(mesh.vertices.shape).to(face_colors.device)
-        torch_scatter.scatter_mean(face_colors.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 3),
-                                   torch.from_numpy(mesh.faces).to(face_colors.device).reshape(-1).long(), dim=0, out=vertex_colors)
-        out_mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=vertex_colors.cpu().numpy(), process=False)
-        out_mesh.export(output_path)
+        try:
+            mesh = trimesh.load(self.mesh_directory / name / self.target_name, process=False)
+            vertex_colors = torch.zeros(mesh.vertices.shape).to(face_colors.device)
+            torch_scatter.scatter_mean(face_colors.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 3),
+                                       torch.from_numpy(mesh.faces).to(face_colors.device).reshape(-1).long(), dim=0, out=vertex_colors)
+            out_mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=vertex_colors.cpu().numpy(), process=False)
+            out_mesh.export(output_path)
+        except Exception as err:
+            print("Failed exporting mesh", err)
 
     @staticmethod
     def erode_mask(mask):
