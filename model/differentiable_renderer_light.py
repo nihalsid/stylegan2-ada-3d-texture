@@ -42,7 +42,7 @@ def render_specular_effects(glctx, lightdir, view_vec, pos_clip, pos_idx, normal
     return ldotr
 
 
-def render_in_bounds(glctx, pos_clip, pos_idx, vtx_col, col_idx, normals, lightdirs, view_vec, shininess, resolution, ranges, color_space, background=None):
+def render_in_bounds(glctx, pos_clip, pos_idx, vtx_col, col_idx, normals, vtx_shininess, lightdirs, view_vec, shininess, resolution, ranges, color_space, background=None):
     # color
     render_resolution = int(resolution * 1.2)
     rast_out, _ = dr.rasterize(glctx, pos_clip, pos_idx, resolution=[render_resolution, render_resolution], ranges=ranges)
@@ -50,8 +50,8 @@ def render_in_bounds(glctx, pos_clip, pos_idx, vtx_col, col_idx, normals, lightd
     color = dr.antialias(color, rast_out, pos_clip, pos_idx)
     mask = color[..., -1:] == 0
     # light
-    reflvec = view_vec - 2.0 * normals * torch.sum(normals * view_vec, -1, keepdim=True)  # Reflection vectors at vertices.
-    reflvec = reflvec / torch.sum(reflvec ** 2, -1, keepdim=True) ** 0.5
+    reflvec = vtx_shininess * (view_vec - 2.0 * normals * torch.sum(normals * view_vec, -1, keepdim=True))  # Reflection vectors at vertices.
+    reflvec = reflvec / (torch.sum(reflvec ** 2, -1, keepdim=True) ** 0.5 + 1e-8)
     rast_out, _ = dr.rasterize(glctx, pos_clip, pos_idx, [render_resolution, render_resolution], ranges=ranges)
     refl, _ = dr.interpolate(reflvec, rast_out, pos_idx)
     refl = refl / (torch.sum(refl ** 2, -1, keepdim=True) + 1e-8) ** 0.5  # Normalize.
@@ -132,10 +132,10 @@ class DifferentiableRenderer(nn.Module):
         if mode == 'bounds':
             self.render_func = render_in_bounds
 
-    def render(self, vertex_positions, triface_indices, vertex_colors, normals, light_directions, view_direction, shininess, ranges=None, background=None, resolution=None):
+    def render(self, vertex_positions, triface_indices, vertex_colors, normals, vertex_shininess, light_directions, view_direction, shininess, ranges=None, background=None, resolution=None):
         if ranges is None:
             ranges = torch.tensor([[0, triface_indices.shape[0]]]).int()
         if resolution is None:
             resolution = self.resolution
-        color, specular = self.render_func(self.glctx, vertex_positions, triface_indices, vertex_colors, triface_indices, normals, light_directions, view_direction, shininess, resolution, ranges, self.color_space, background)
+        color, specular = self.render_func(self.glctx, vertex_positions, triface_indices, vertex_colors, triface_indices, normals, vertex_shininess, light_directions, view_direction, shininess, resolution, ranges, self.color_space, background)
         return color[:, :, :, :self.num_channels], specular

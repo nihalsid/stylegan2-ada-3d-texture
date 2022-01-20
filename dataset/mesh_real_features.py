@@ -68,6 +68,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         pt_arxiv = torch.load(os.path.join(self.dataset_directory, f'{selected_item}.pt'))
         vertices = pt_arxiv['vertices'].float()
         indices = pt_arxiv['indices'].int()
+        normals = pt_arxiv['normals'].float()
         edge_index = pt_arxiv['conv_data'][0][0].long()
         num_sub_vertices = [pt_arxiv['conv_data'][i][0].shape[0] for i in range(1, len(pt_arxiv['conv_data']))]
         pad_sizes = [pt_arxiv['conv_data'][i][2].shape[0] for i in range(len(pt_arxiv['conv_data']))]
@@ -92,6 +93,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "y": self.cspace_convert(pt_arxiv['target_colors'].float() * 2),
             "vertex_ctr": vctr,
             "vertices": vertices,
+            "normals": normals,
             "indices_quad": indices,
             "mvp": mvp,
             "cam_position": cam_positions,

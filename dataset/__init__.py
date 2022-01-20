@@ -24,6 +24,12 @@ def to_vertex_colors_scatter(face_colors, batch):
     return vertex_colors[batch['vertex_ctr'], :]
 
 
+def to_vertex_shininess_scatter(face_shininess, batch):
+    vertex_shininess = torch.zeros((batch["vertices"].shape[0] // batch["mvp"].shape[1], face_shininess.shape[1])).to(face_shininess.device)
+    torch_scatter.scatter_mean(face_shininess.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 1), batch["indices_quad"].reshape(-1).long(), dim=0, out=vertex_shininess)
+    return vertex_shininess[batch['vertex_ctr'], :]
+
+
 def to_device(batch, device):
     for k in batch.keys():
         if isinstance(batch[k], torch.Tensor):
@@ -204,6 +210,8 @@ class Collater(object):
                 elif key == 'vertices':
                     retdict[key] = self.cat_collate([transform_pos_mvp(d['vertices'], d['mvp']) for d in batch])
                     retdict['view_vector'] = self.cat_collate([(d['vertices'].unsqueeze(0).expand(d['cam_position'].shape[0], -1, -1) - d['cam_position'].unsqueeze(1).expand(-1, d['vertices'].shape[0], -1)).reshape(-1, 3) for d in batch])
+                elif key == 'normals':
+                    retdict[key] = self.cat_collate([d['normals'].unsqueeze(0).expand(d['cam_position'].shape[0], -1, -1).reshape(-1, 3) for d in batch])
                 elif key == 'indices':
                     num_vertex = 0
                     indices = []
