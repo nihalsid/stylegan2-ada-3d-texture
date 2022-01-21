@@ -18,6 +18,7 @@ def get_default_perspective_cam():
 
 
 def to_vertex_colors_scatter(face_colors, batch):
+    assert face_colors.shape[1] == 3
     vertex_colors = torch.zeros((batch["vertices"].shape[0] // batch["mvp"].shape[1], face_colors.shape[1] + 1)).to(face_colors.device)
     torch_scatter.scatter_mean(face_colors.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 3), batch["indices_quad"].reshape(-1).long(), dim=0, out=vertex_colors)
     vertex_colors[:, 3] = 1
@@ -25,6 +26,7 @@ def to_vertex_colors_scatter(face_colors, batch):
 
 
 def to_vertex_shininess_scatter(face_shininess, batch):
+    assert face_shininess.shape[1] == 1
     vertex_shininess = torch.zeros((batch["vertices"].shape[0] // batch["mvp"].shape[1], face_shininess.shape[1])).to(face_shininess.device)
     torch_scatter.scatter_mean(face_shininess.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 1), batch["indices_quad"].reshape(-1).long(), dim=0, out=vertex_shininess)
     return vertex_shininess[batch['vertex_ctr'], :]
