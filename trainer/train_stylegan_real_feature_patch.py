@@ -38,7 +38,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.config = config
         self.train_set = FaceGraphMeshDataset(config)
         self.val_set = FaceGraphMeshDataset(config, config.num_eval_images)
-        self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base)
+        self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max)
         self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
         self.patch_D = Discriminator(config.patch_size, 3 * config.views_per_sample * config.num_patch_per_view, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
         self.E = GraphEncoder(self.train_set.num_feats)

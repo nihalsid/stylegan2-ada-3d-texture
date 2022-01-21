@@ -1,42 +1,43 @@
 import torch
 import numpy as np
 from model import activation_funcs, FullyConnectedLayer, clamp_gain, normalize_2nd_moment
-from model.graph import create_faceconv_input, SmoothUpsample, modulated_face_conv
+from model.graph import create_faceconv_input, SmoothUpsample, modulated_texture_conv, modulated_face_conv
 
 
 class Generator(torch.nn.Module):
 
-    def __init__(self, z_dim, w_dim, w_num_layers, num_faces, color_channels, c_dim=0, channel_base=16384, channel_max=512):
+    def __init__(self, z_dim, w_dim, w_num_layers, num_faces, color_channels, aggregation_function, c_dim=0, channel_base=16384, channel_max=512):
         super().__init__()
         self.z_dim = z_dim
         self.w_dim = w_dim
         self.c_dim = c_dim
         self.num_faces = num_faces
         self.color_channels = color_channels
-        self.synthesis = SynthesisNetwork(w_dim=w_dim, num_faces=num_faces, color_channels=color_channels, channel_base=channel_base, channel_max=channel_max)
+        self.synthesis = SynthesisNetwork(w_dim=w_dim, num_faces=num_faces, color_channels=color_channels, channel_base=channel_base, channel_max=channel_max, aggregation_function=aggregation_function)
         self.num_ws = self.synthesis.num_ws
         self.mapping = MappingNetwork(z_dim=z_dim, w_dim=w_dim, c_dim=c_dim, num_ws=self.num_ws, num_layers=w_num_layers)
 
-    def forward(self, graph_data, z, shape, semantics, c=None, truncation_psi=1, truncation_cutoff=None, noise_mode='random'):
+    def forward(self, graph_data, z, shape, c=None, truncation_psi=1, truncation_cutoff=None, noise_mode='random'):
         ws = self.mapping(z, c, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff)
-        img = self.synthesis(graph_data, ws, shape, semantics, noise_mode)
+        img = self.synthesis(graph_data, ws, shape, noise_mode)
         return img
 
 
 class SynthesisNetwork(torch.nn.Module):
 
-    def __init__(self, w_dim, num_faces, color_channels, channel_base=16384, channel_max=512):
+    def __init__(self, w_dim, num_faces, color_channels, aggregation_function, channel_base=16384, channel_max=512):
         super().__init__()
         self.w_dim = w_dim
         self.num_faces = num_faces
         self.color_channels = color_channels
         self.block_pow_2 = [2 ** i for i in range(2, len(self.num_faces) + 2)]
         channels_dict = {res: min(channel_base // res, channel_max) for res in self.block_pow_2}
-        channels_dict_geo = {4: 192, 8: 192, 16: 128, 32: 128, 64: 96, 128: 0}
+        channels_dict_geo = {4: 256, 8: 256, 16: 128, 32: 128, 64: 128, 128: 0}
         self.blocks = torch.nn.ModuleList()
         block_level = len(self.block_pow_2) - 1
         self.num_ws = 2 * len(self.block_pow_2)
-        self.first_block = SynthesisPrologue(channels_dict[self.block_pow_2[0]], w_dim=w_dim, geo_channels=channels_dict_geo[4], num_face=num_faces[block_level], color_channels=color_channels)
+        self.first_block = SynthesisPrologue(channels_dict[self.block_pow_2[0]], w_dim=w_dim, geo_channels=channels_dict_geo[4],
+                                             num_face=num_faces[block_level], color_channels=color_channels, aggregation_function=aggregation_function)
         for blk_idx, cdict_key in enumerate(self.block_pow_2[1:]):
             block_level -= 1
             in_channels = channels_dict[cdict_key // 2]
@@ -44,10 +45,11 @@ class SynthesisNetwork(torch.nn.Module):
             out_channels = channels_dict[cdict_key]
             block = SynthesisBlock(in_channels, out_channels, w_dim=w_dim, geo_channels=geo_channels,
                                    num_face=num_faces[block_level],
-                                   color_channels=color_channels, last_block=blk_idx == (len(self.block_pow_2[1:]) - 1))
+                                   color_channels=color_channels, aggregation_function=aggregation_function,
+                                   last_block=blk_idx == (len(self.block_pow_2[1:]) - 1))
             self.blocks.append(block)
 
-    def forward(self, graph_data, ws, shape, semantics, noise_mode='random'):
+    def forward(self, graph_data, ws, shape, noise_mode='random'):
         split_ws = [ws[:, 0:2, :]] + [ws[:, 2 * n + 1: 2 * n + 4, :] for n in range(len(self.block_pow_2) - 1)]
         neighborhoods = [graph_data['face_neighborhood']] + graph_data['sub_neighborhoods']
         appended_pool_maps = [None] + graph_data['pool_maps']
@@ -63,21 +65,21 @@ class SynthesisNetwork(torch.nn.Module):
                                                          [graph_data['is_pad'][block_level + 1], graph_data['is_pad'][block_level]], \
                                                          [graph_data['pads'][block_level + 1], graph_data['pads'][block_level]], \
                                                          [appended_pool_maps[block_level + 1], appended_pool_maps[block_level]]
-            x, face_colors = self.blocks[i](sub_neighborhoods, is_pad, pads, pool_maps, x, face_colors, split_ws[i + 1], shape[len(shape) - 1 - i], semantics[len(shape) - 1 - i], noise_mode)
+            x, face_colors = self.blocks[i](sub_neighborhoods, is_pad, pads, pool_maps, x, face_colors, split_ws[i + 1], shape[len(shape) - 1 - i], noise_mode)
 
         return face_colors
 
 
 class SynthesisPrologue(torch.nn.Module):
 
-    def __init__(self, out_channels, w_dim, geo_channels, num_face, color_channels):
+    def __init__(self, out_channels, w_dim, geo_channels, num_face, color_channels, aggregation_function):
         super().__init__()
         self.w_dim = w_dim
         self.num_face = num_face
         self.color_channels = color_channels
         self.const = torch.nn.Parameter(torch.randn([num_face, out_channels]))
-        self.conv1 = SynthesisLayer(out_channels, out_channels - 2 * geo_channels, w_dim=w_dim, num_face=num_face)
-        self.torgb = ToRGBLayer(out_channels - 2 * geo_channels, color_channels, w_dim=w_dim, num_face=num_face)
+        self.conv1 = SynthesisLayer(out_channels, out_channels - geo_channels, w_dim=w_dim, num_face=num_face, aggregation_function=aggregation_function)
+        self.torgb = ToRGBLayer(out_channels - geo_channels, color_channels, w_dim=w_dim, num_face=num_face)
 
     def forward(self, face_neighborhood, face_is_pad, pad_size, pool_map, ws, noise_mode):
         w_iter = iter(ws.unbind(dim=1))
@@ -89,7 +91,7 @@ class SynthesisPrologue(torch.nn.Module):
 
 class SynthesisBlock(torch.nn.Module):
 
-    def __init__(self, in_channels, out_channels, w_dim, geo_channels, num_face, color_channels, last_block):
+    def __init__(self, in_channels, out_channels, w_dim, geo_channels, num_face, color_channels, aggregation_function, last_block):
         super().__init__()
         self.in_channels = in_channels
         self.w_dim = w_dim
@@ -98,15 +100,15 @@ class SynthesisBlock(torch.nn.Module):
         self.num_conv = 0
         self.num_torgb = 0
         self.resampler = SmoothUpsample()
-        self.conv0 = SynthesisLayer(in_channels, out_channels, w_dim=w_dim, num_face=num_face, resampler=self.resampler)
-        self.conv1 = SynthesisLayer(out_channels, out_channels - 2 * geo_channels, w_dim=w_dim, num_face=num_face)
-        self.torgb = ToRGBLayer(out_channels - 2 * geo_channels, color_channels, w_dim=w_dim, num_face=num_face)
+        self.conv0 = SynthesisLayer(in_channels, out_channels, w_dim=w_dim, num_face=num_face, resampler=self.resampler, aggregation_function=aggregation_function)
+        self.conv1 = SynthesisLayer(out_channels, out_channels - geo_channels, w_dim=w_dim, num_face=num_face, aggregation_function=aggregation_function)
+        self.torgb = ToRGBLayer(out_channels - geo_channels, color_channels, w_dim=w_dim, num_face=num_face)
         self.last_block = last_block
 
-    def forward(self, face_neighborhood, face_is_pad, pad_size, pool_map, x, img, ws, shape, semantics, noise_mode):
+    def forward(self, face_neighborhood, face_is_pad, pad_size, pool_map, x, img, ws, shape, noise_mode):
         w_iter = iter(ws.unbind(dim=1))
 
-        x = torch.cat([x, shape, semantics], dim=1)
+        x = torch.cat([x, shape], dim=1)
         x = self.conv0(x, face_neighborhood, face_is_pad, pad_size, pool_map[0], next(w_iter), noise_mode=noise_mode)
         x = self.conv1(x, face_neighborhood[1:], face_is_pad[1:], pad_size[1:], pool_map[1], next(w_iter), noise_mode=noise_mode)
 
@@ -140,15 +142,17 @@ class ToRGBLayer(torch.nn.Module):
 
 class SynthesisLayer(torch.nn.Module):
 
-    def __init__(self, in_channels, out_channels, w_dim, num_face, kernel_size=3, resampler=None, activation='lrelu'):
+    def __init__(self, in_channels, out_channels, w_dim, num_face, aggregation_function, resampler=None, activation='lrelu'):
         super().__init__()
-        self.kernel_size = kernel_size
+        self.aggregation_function = torch.nn.MaxPool2d(kernel_size=(1, 9)) if aggregation_function == 'max' else torch.nn.AvgPool2d(kernel_size=(1, 9))
         self.num_face = num_face
         self.resampler = resampler
         self.activation = activation_funcs[activation]['fn']
         self.activation_gain = activation_funcs[activation]['def_gain']
         self.affine = FullyConnectedLayer(w_dim, in_channels, bias_init=1)
-        self.weight = torch.nn.Parameter(torch.randn([out_channels, in_channels, 1,  kernel_size ** 2]))
+        self.weight_center = torch.nn.Parameter(torch.randn([out_channels, in_channels, 1,  1]))
+        self.weight_side = torch.nn.Parameter(torch.randn([out_channels, in_channels, 1, 1]))
+        self.weight_corner = torch.nn.Parameter(torch.randn([out_channels, in_channels, 1, 1]))
 
         self.register_buffer('noise_const', torch.randn([num_face, ]))
         self.noise_strength = torch.nn.Parameter(torch.zeros([1]))
@@ -164,8 +168,8 @@ class SynthesisLayer(torch.nn.Module):
         elif noise_mode == 'const':
             noise = self.noise_const.unsqueeze(0).repeat([styles.shape[0], 1]).reshape([styles.shape[0] * self.num_face, 1]) * self.noise_strength
 
-        x = create_faceconv_input(x, self.kernel_size ** 2, face_neighborhood[0], face_is_pad[0], pad_size[0])
-        x = modulated_face_conv(x=x, weight=self.weight, styles=styles)
+        x = create_faceconv_input(x, 9, face_neighborhood[0], face_is_pad[0], pad_size[0])
+        x = modulated_texture_conv(x=x, weight_center=self.weight_center, weight_side=self.weight_side, weight_corner=self.weight_corner, styles=styles, aggregate_function=self.aggregation_function)
         if self.resampler is not None:
             x = self.resampler(x, face_neighborhood[1], face_is_pad[1], pad_size[1], pool_map)
         x = x + noise

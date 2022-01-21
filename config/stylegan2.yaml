@@ -79,6 +79,10 @@ num_workers: 8
 optimize_lights: False
 optimize_shininess: False
 
+conv_aggregation: max
+g_channel_max: 512
+enc_conv: face
+
 df_trunc: 0.3125
 df_size: 0.0625
 df_mean: 0.2839

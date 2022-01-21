@@ -6,14 +6,14 @@ from model.graph import create_faceconv_input, SmoothUpsample, modulated_face_co
 
 class Generator(torch.nn.Module):
 
-    def __init__(self, z_dim, w_dim, w_num_layers, num_faces, color_channels, c_dim=0, channel_base=16384):
+    def __init__(self, z_dim, w_dim, w_num_layers, num_faces, color_channels, c_dim=0, channel_base=16384, channel_max=512):
         super().__init__()
         self.z_dim = z_dim
         self.w_dim = w_dim
         self.c_dim = c_dim
         self.num_faces = num_faces
         self.color_channels = color_channels
-        self.synthesis = SynthesisNetwork(w_dim=w_dim, num_faces=num_faces, color_channels=color_channels, channel_base=channel_base)
+        self.synthesis = SynthesisNetwork(w_dim=w_dim, num_faces=num_faces, color_channels=color_channels, channel_base=channel_base, channel_max=channel_max)
         self.num_ws = self.synthesis.num_ws
         self.mapping = MappingNetwork(z_dim=z_dim, w_dim=w_dim, c_dim=c_dim, num_ws=self.num_ws, num_layers=w_num_layers)
 

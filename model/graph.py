@@ -50,6 +50,37 @@ def modulated_face_conv(x, weight, styles, demodulate=True):
     return x
 
 
+def modulated_texture_conv(x, weight_center, weight_side, weight_corner, styles, aggregate_function, demodulate=True):
+    batch_size = styles.shape[0]
+    num_faces = x.shape[0] // batch_size
+    out_channels, in_channels = weight_center.shape[:2]
+    w_center = weight_center.unsqueeze(0)
+    w_center = w_center * styles.reshape(batch_size, 1, -1, 1, 1)
+    w_side = weight_side.unsqueeze(0)
+    w_side = w_side * styles.reshape(batch_size, 1, -1, 1, 1)
+    w_corner = weight_corner.unsqueeze(0)
+    w_corner = w_corner * styles.reshape(batch_size, 1, -1, 1, 1)
+
+    if demodulate:
+        dcoefs = (w_center.square().sum(dim=[2, 3, 4]) + 1e-8).rsqrt()
+        w_center = w_center * dcoefs.reshape(batch_size, -1, 1, 1, 1)
+        dcoefs = (w_side.square().sum(dim=[2, 3, 4]) + 1e-8).rsqrt()
+        w_side = w_side * dcoefs.reshape(batch_size, -1, 1, 1, 1)
+        dcoefs = (w_corner.square().sum(dim=[2, 3, 4]) + 1e-8).rsqrt()
+        w_corner = w_corner * dcoefs.reshape(batch_size, -1, 1, 1, 1)
+
+    x = x.reshape(batch_size, num_faces, *x.shape[1:]).permute((1, 0, 2, 3, 4)).reshape(num_faces, batch_size * in_channels, 1, -1)
+    w_center = w_center.reshape(-1, in_channels, 1, 1)
+    w_side = w_side.reshape(-1, in_channels, 1, 1)
+    w_corner = w_corner.reshape(-1, in_channels, 1, 1)
+    x_center = torch.nn.functional.conv2d(x[:, :, :, 0:1], w_center, groups=batch_size)
+    x_side = torch.nn.functional.conv2d(x[:, :, :, [1, 3, 5, 7]], w_side, groups=batch_size)
+    x_corner = torch.nn.functional.conv2d(x[:, :, :, [2, 4, 6, 8]], w_corner, groups=batch_size)
+    x = aggregate_function(torch.cat([x_center, x_side, x_corner], dim=3))
+    x = x.reshape(num_faces, batch_size * out_channels).reshape(num_faces, batch_size, out_channels).permute((1, 0, 2)).reshape((batch_size * num_faces, out_channels))
+    return x
+
+
 class SmoothUpsample(torch.nn.Module):
 
     def __init__(self):
@@ -106,6 +137,27 @@ class FaceConvDemodulated(torch.nn.Module):
         x = create_faceconv_input(x, self.kernel_size ** 2, face_neighborhood, face_is_pad, pad_size)
         x = torch.nn.functional.conv2d(x, w).squeeze(-1).squeeze(-1) + self.bias
         return x
+
+
+class TextureConv(torch.nn.Module):
+
+    def __init__(self, in_channels, out_channels, aggregation_func="max"):
+        super().__init__()
+        self.conv_center = torch.nn.Conv2d(in_channels, out_channels, (1, 1), padding=0)
+        self.conv_sides = torch.nn.Conv2d(in_channels, out_channels, (1, 1), padding=0)
+        self.conv_corners = torch.nn.Conv2d(in_channels, out_channels, (1, 1), padding=0)
+        self.aggregation_function = torch.nn.MaxPool2d(kernel_size=(1, 9)) if aggregation_func == 'max' else torch.nn.AvgPool2d(kernel_size=(1, 9))
+
+    def forward(self, x, face_neighborhood, face_is_pad, pad_size):
+        faceconv_input = create_faceconv_input(x, 9, face_neighborhood, face_is_pad, pad_size)
+        center = faceconv_input[:, :, :, 0:1]
+        sides = faceconv_input[:, :, :, [1, 3, 5, 7]]
+        corners = faceconv_input[:, :, :, [2, 4, 6, 8]]
+        center = self.conv_center(center)
+        sides = self.conv_center(sides)
+        corners = self.conv_center(corners)
+        out = self.aggregation_function(torch.cat([center, sides, corners], dim=3))
+        return out.squeeze(-1).squeeze(-1)
 
 
 class SymmetricFaceConv(torch.nn.Module):
