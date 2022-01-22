@@ -141,7 +141,7 @@ class FaceConvDemodulated(torch.nn.Module):
 
 class TextureConv(torch.nn.Module):
 
-    def __init__(self, in_channels, out_channels, aggregation_func="max"):
+    def __init__(self, in_channels, out_channels, aggregation_func="mean"):
         super().__init__()
         self.conv_center = torch.nn.Conv2d(in_channels, out_channels, (1, 1), padding=0)
         self.conv_sides = torch.nn.Conv2d(in_channels, out_channels, (1, 1), padding=0)

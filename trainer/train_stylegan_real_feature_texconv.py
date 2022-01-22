@@ -14,7 +14,7 @@ from dataset.mesh_real_features import FaceGraphMeshDataset
 from dataset import to_vertex_colors_scatter, GraphDataLoader, to_device
 from model.augment import AugmentPipe
 from model.differentiable_renderer import DifferentiableRenderer
-from model.graph import GraphEncoder
+from model.graph import GraphEncoder, FaceConv, TextureConv
 from model.graph_generator_u_texconv import Generator
 from model.discriminator import Discriminator
 from model.loss import PathLengthPenalty, compute_gradient_penalty

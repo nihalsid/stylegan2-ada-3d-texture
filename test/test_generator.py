@@ -230,4 +230,4 @@ def test_generator_u_textureconv(config):
 
 
 if __name__ == '__main__':
-    test_generator_u_textureconv()
+    test_generator_u()
