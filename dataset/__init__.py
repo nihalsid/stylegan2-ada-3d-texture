@@ -214,6 +214,12 @@ class Collater(object):
                     retdict['view_vector'] = self.cat_collate([(d['vertices'].unsqueeze(0).expand(d['cam_position'].shape[0], -1, -1) - d['cam_position'].unsqueeze(1).expand(-1, d['vertices'].shape[0], -1)).reshape(-1, 3) for d in batch])
                 elif key == 'normals':
                     retdict[key] = self.cat_collate([d['normals'].unsqueeze(0).expand(d['cam_position'].shape[0], -1, -1).reshape(-1, 3) for d in batch])
+                elif key == 'uv':
+                    uvs = []
+                    for b_i in range(len(batch)):
+                        batch[b_i][key][:, 0] += b_i * 6
+                        uvs.append(batch[b_i][key].unsqueeze(0).expand(batch[b_i]['cam_position'].shape[0], -1, -1).reshape(-1, 3))
+                    retdict[key] = self.cat_collate(uvs)
                 elif key == 'indices':
                     num_vertex = 0
                     indices = []
@@ -247,6 +253,8 @@ class Collater(object):
                     retdict[key] = self.cat_collate(vertex_counts)
                 elif key in ['real', 'mask', 'patch', 'real_hres', 'mask_hres']:
                     retdict[key] = self.cat_collate([d[key] for d in batch])
+                elif key == 'uv_vertex_ctr':
+                    retdict[key] = [d[key] for d in batch]
                 else:
                     retdict[key] = self.collate([d[key] for d in batch])
             return retdict

@@ -16,6 +16,8 @@ image_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars
 mask_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars_mask
 condition_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold_autoencoder
 stat_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres_stat.pt
+uv_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_map
+silhoutte_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_mask
 mesh_resolution: 64
 
 experiment: fast_dev

@@ -18,7 +18,7 @@ def transform_pos_mvp(pos, mvp):
     return torch.bmm(posw.unsqueeze(0).expand(mvp.shape[0], -1, -1), mvp.permute((0, 2, 1))).reshape((-1, 4))
 
 
-def render(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ranges, background=None):
+def render(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ranges, _colorspace, background=None):
     rast_out, _ = dr.rasterize(glctx, pos_clip, pos_idx, resolution=[resolution, resolution], ranges=ranges)
     color, _ = dr.interpolate(vtx_col[None, ...], rast_out, col_idx)
     color = dr.antialias(color, rast_out, pos_clip, pos_idx)
