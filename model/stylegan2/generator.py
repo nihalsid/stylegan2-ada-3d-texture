@@ -57,8 +57,6 @@ class SynthesisPrologue(torch.nn.Module):
 
     def __init__(self, out_channels, w_dim, resolution, img_channels, synthesis_layer):
         super().__init__()
-        SynthesisLayer = SynthesisLayer2 if synthesis_layer == 'stylegan2' else SynthesisLayer1
-        ToRGBLayer = ToRGBLayer2 if synthesis_layer == 'stylegan2' else ToRGBLayer1
         self.w_dim = w_dim
         self.resolution = resolution
         self.img_channels = img_channels
@@ -90,17 +88,17 @@ class SynthesisBlock(torch.nn.Module):
         self.num_torgb = 0
         self.resampler = SmoothUpsample()
         self.conv0 = SynthesisLayer(in_channels, out_channels, w_dim=w_dim, resolution=resolution, resampler=self.resampler)
-        # self.spade_0 = SPADE_IN(out_channels, 2)
+        self.spade_0 = SPADE_IN(out_channels, 2)
         self.conv1 = SynthesisLayer(out_channels, out_channels, w_dim=w_dim, resolution=resolution)
-        # self.spade_1 = SPADE_IN(out_channels, 2)
+        self.spade_1 = SPADE_IN(out_channels, 2)
         self.torgb = ToRGBLayer(out_channels, img_channels, w_dim=w_dim)
 
     def forward(self, x, img, ws, silhoutte, noise_mode):
         w_iter = iter(ws.unbind(dim=1))
 
-        x = self.conv0(x, next(w_iter), silhoutte, noise_mode=noise_mode)
+        x = self.conv0(x, next(w_iter), noise_mode=noise_mode)
         x = self.spade_0(x, silhoutte)
-        x = self.conv1(x, next(w_iter), silhoutte, noise_mode=noise_mode)
+        x = self.conv1(x, next(w_iter), noise_mode=noise_mode)
         x = self.spade_1(x, silhoutte)
 
         y = self.torgb(x, next(w_iter))
@@ -228,47 +226,30 @@ class ConvDemodulated(torch.nn.Module):
         self.weight = torch.nn.Parameter(torch.randn([out_channels, in_channels, 1, 1]))
         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
 
-    def forward(self, x):
-        batch_size = x.shape[0]
+    def forward(self, x, s):
+        w = self.weight
         out_channels, in_channels, kh, kw = self.weight.shape
+        padding = kh // 2
+        w2 = w * w
+        s2 = s * s
+        denominator = torch.nn.functional.conv2d(s2, w2, padding=padding).mean(-1).mean(-1)
+        numerator = torch.nn.functional.conv2d(x * s, w, padding=padding)
+        out = numerator / denominator[:, :, None, None]
 
-        w = self.weight.unsqueeze(0).expand(batch_size, -1, -1, -1, -1)
-
-        dcoefs = (w.square().sum(dim=[2, 3, 4]) + 1e-8).rsqrt()  # [NO]
-        w = w * dcoefs.reshape(batch_size, -1, 1, 1, 1)  # [NOIkk]
-
-        x = x.reshape(1, -1, *x.shape[2:])
-        w = w.reshape(-1, in_channels, kh, kw)
-        x = torch.nn.functional.conv2d(x, w, padding=0, groups=batch_size)
-        x = x.reshape(batch_size, -1, *x.shape[2:])
-        return torch.clamp(x + self.bias[None, :, None, None], -256, 256)
+        return torch.clamp(out + self.bias[None, :, None, None], -256, 256)
 
 
 class SPADE_IN(torch.nn.Module):
 
     def __init__(self, norm_nc, label_nc):
         super().__init__()
-
-        self.param_free_norm = torch.nn.BatchNorm2d(norm_nc, affine=False)
-
-        nhidden = 128
-
-        self.mlp_shared = torch.nn.Sequential(
-            ConvDemodulated(label_nc, nhidden),
-            torch.nn.ReLU()
-        )
-        self.mlp_gamma = ConvDemodulated(nhidden, norm_nc)
-        self.mlp_beta = ConvDemodulated(nhidden, norm_nc)
+        self.semantic_features = torch.nn.Conv2d(label_nc, norm_nc, kernel_size=(1, 1))
+        self.modulated_conv = ConvDemodulated(norm_nc, norm_nc)
 
     def forward(self, x, segmap):
-        normalized = self.param_free_norm(x)
         segmap = torch.nn.functional.interpolate(segmap, size=x.size()[2:], mode='nearest')
-        actv = self.mlp_shared(segmap)
-        gamma = self.mlp_gamma(actv)
-        beta = self.mlp_beta(actv)
-
-        # apply scale and bias
-        out = normalized * (1 + gamma) + beta
+        semantic_features = self.semantic_features(segmap)
+        out = self.modulated_conv(x, semantic_features)
         return out
 
 
