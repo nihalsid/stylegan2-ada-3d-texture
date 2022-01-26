@@ -8,7 +8,7 @@
 #mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturesForGraphQuad32
 #mesh_resolution: 64
 
-dataset_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres-part_processed
+dataset_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres-part_processed_color
 mesh_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres
 pairmeta_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/metadata/pairs.json
 df_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/shapenet-chairs-manifold

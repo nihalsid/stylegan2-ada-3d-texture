@@ -172,7 +172,7 @@ def test_texture_conv(config):
 
 @hydra.main(config_path='../config', config_name='stylegan2')
 def test_generator_u_spade(config):
-    from model.graph_generator_u_spade import Generator
+    from model.graph_generator_u_spade2 import Generator
     from dataset.mesh_real_features_patch_spool import FaceGraphMeshDataset
     batch_size = 4
     dataset = FaceGraphMeshDataset(config)
@@ -230,4 +230,4 @@ def test_generator_u_textureconv(config):
 
 
 if __name__ == '__main__':
-    test_generator_u()
+    test_generator_u_spade()
