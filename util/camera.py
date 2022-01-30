@@ -139,7 +139,6 @@ class PerspectiveCamera(BaseCamera):
         view_mat = np.eye(4)
         view_mat[:3, :3] = rotation_mat
         view_mat[:3, 3] = -position
-
         return view_mat
 
     def serialize(self):

@@ -1,25 +1,51 @@
-# stylegan2-ada-lightning
+# stylegan2-ada-3d-texture
 
-Simplified pytorch-lightning port of [StyleGAN2-ADA](https://github.com/NVlabs/stylegan2-ada). 
-
+Surface texture GAN.
 Configuration provided with hydra config file `config/stylegan2.yaml`. Once configured, train with:
+
+## Dataset
+
+```bash
+create symlinks
+wget xyz
+unzip xyz
+```
+
+## Output Directories
+
+```bash
+symlinks
+```
+
+## Running Experiments
 
 ```bash
 python trainer/train_stylegan.py wandb_main=True
 ```
 
-Configuration can be overriden with command line flags.
-
 ## Configuration
+
+Configuration can be overriden with command line flags.
 
 | Key | Description | Default |
 | ----|-------------|---------|
-|`dataset_path`| Directory with training images|`data/ffhq`|
+|`dataset_path`| Directory with processed data||
+|`mesh_path`| Directory with processed mesh (highest res)||
+|`pairmeta_path`| Directory with metadata for image-shape pairs (photoshape specific)||
+|`df_path`| not used anymore ||
+|`image_path`| real images ||
+|`mask_path`| real image segmentation masks ||
+|`condition_path`| not used anymore ||
+|`stat_path`| not used anymore ||
+|`uv_path`| processed uv data (for uv baseline) ||
+|`silhoutte_path`| texture atlas silhoutte data (for uv baseline) ||
+|`mesh_resolution`| not used anymore||
 |`experiment`| Experiment name used for logs |`fast_dev`|
 |`wandb_main`| If false, results logged to "<project>-dev" wandb project (for dev logs)|`False`|
 |`num_mapping_layers`| Number of layers in the mapping network |2|
 |`lr_g`| Generator learning rate | 0.002|
 |`lr_d`| Discriminator learning rate |0.00235|
+|`lr_e`| Encoder learning rate |0.0001|
 |`lambda_gp`| Gradient penalty weight | 0.0256 |
 |`lambda_plp`| Path length penalty weight |2|
 |`lazy_gradient_penalty_interval`| Gradient penalty regularizer interval |16|

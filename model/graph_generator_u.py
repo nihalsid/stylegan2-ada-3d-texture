@@ -184,9 +184,10 @@ class MappingNetwork(torch.nn.Module):
         self.num_layers = num_layers
         self.w_avg_beta = w_avg_beta
 
-        features_list = [z_dim + c_dim] + [w_dim] * num_layers
+        features_list = [z_dim] + [w_dim] * num_layers
 
         if c_dim > 0:
+            features_list[0] += w_dim
             self.embed = FullyConnectedLayer(c_dim, w_dim)
 
         self.layers = torch.nn.ModuleList()

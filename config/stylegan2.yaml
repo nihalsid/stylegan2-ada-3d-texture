@@ -100,7 +100,7 @@ create_new_resume: False
 wandb_main: False
 suffix: ''
 
-preload: True
+preload: False
 
 hydra:
   output_subdir: null # Disable saving of config files. We'll do that ourselves.
