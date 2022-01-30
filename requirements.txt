@@ -1,7 +1,5 @@
-torch~=1.10.0
 ballpark~=1.4.0
 argparse~=1.4.0
-yaml
 pyyaml
 typing~=3.6.4
 omegaconf~=2.0.6
@@ -13,7 +11,6 @@ hydra~=2.5
 pytorch-lightning
 tqdm~=4.48.2
 torchmetrics~=0.6.0
-nvdiffrast~=0.2.6
 pyrender
 trimesh~=3.9.29
 scipy~=1.7.1
@@ -24,3 +21,6 @@ scikit-image~=0.19.1
 ninja
 imageio
 imageio-ffmpeg
+hydra-core
+torch-ema==0.2
+clean-fid

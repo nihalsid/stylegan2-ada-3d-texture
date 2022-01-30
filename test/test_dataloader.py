@@ -82,5 +82,11 @@ def test_masks(config):
             print(mask)
 
 
+@hydra.main(config_path='../config', config_name='stylegan2')
+def test_grid_dataloader(config):
+    pass
+
+
 if __name__ == '__main__':
-    test_view_angles_together()
+    # test_view_angles_together()
+    test_grid_dataloader()

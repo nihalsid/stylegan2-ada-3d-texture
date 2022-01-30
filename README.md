@@ -8,6 +8,7 @@ Install python requirements:
 
 ```commandline
 pip install -r requirements.txt
+pip install torch==1.10.2+cu113 torchvision==0.11.3+cu113 torchaudio==0.10.2+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html
 ```
 
 Also, for differentiable rendering we use `nvdiffrast`. You'll need to install its dependencies:
@@ -37,6 +38,11 @@ cd nvdiffrast
 pip install .
 ```
 
+Apart from this, you will need approporiate versions of torch-scatter, torch-sparse, torch-spline-conv, torch-geometric, depending on your torch+cuda combination. E.g. for torch-1.10 + cuda11.3 you'd need:  
+
+```commandline
+pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f https://data.pyg.org/whl/torch-1.10.0+cu113.html
+```
 ## Dataset
 
 From project root execute:
@@ -59,7 +65,7 @@ ln -s OUTPUTDIR runs
 Configuration provided with hydra config file `config/stylegan2.yaml`. Example training:
 
 ```bash
-python trainer/train_stylegan_real_feature.py wandb_main=True val_check_interval=5 experiment=test_run lr_d=0.001 sanity_steps=1 lambda_gp=14 image_size=512 batch_size=4 num_mapping_layers=5 views_per_sample=2 g_channel_base=32768 random_bg=grayscale num_vis_images=256 preload=False dataset_path=data/Photoshape/shapenet-chairs-manifold-highres-part_processed_color mesh_path=data/Photoshape/shapenet-chairs-manifold-highres pairmeta_path=data/Photoshape-model/metadata/pairs.json image_path=data/Photoshape/exemplars mask_path=data/Photoshape/exemplars_mask
+python trainer/train_stylegan_real_feature.py wandb_main=False val_check_interval=5 experiment=test_run lr_d=0.001 sanity_steps=1 lambda_gp=14 image_size=512 batch_size=4 num_mapping_layers=5 views_per_sample=2 g_channel_base=32768 random_bg=grayscale num_vis_images=256 preload=False dataset_path=data/Photoshape/shapenet-chairs-manifold-highres-part_processed_color mesh_path=data/Photoshape/shapenet-chairs-manifold-highres pairmeta_path=data/Photoshape-model/metadata/pairs.json image_path=data/Photoshape/exemplars mask_path=data/Photoshape/exemplars_mask
 ```
 
 ## Configuration
