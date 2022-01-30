@@ -28,14 +28,15 @@ views_photoshape = load_pair_meta_views(image_path, pairmeta_path)
 view_keys = sorted(list(views_photoshape.keys()))
 
 
-def create_camera_distribution():
+def test_camera_distribution():
     positions = []
     print(len(view_keys))
     for vk in view_keys:
         c_v = views_photoshape[vk]
-        perspective_cam = spherical_coord_to_cam(c_v['fov'], c_v['azimuth'], c_v['elevation'])
-        noise = np.array([random.random(), random.random(), random.random()]) * 0.12
-        positions.append(perspective_cam.position + noise)
+        noise_azimuth = (random.random() - 0.5) * 0.075
+        noise_elevation = (random.random() - 0.5) * 0.075
+        perspective_cam = spherical_coord_to_cam(c_v['fov'], c_v['azimuth'] + noise_azimuth, c_v['elevation'] + noise_elevation)
+        positions.append(perspective_cam.position)
     Path("camera_distribution.obj").write_text("\n".join([f"v {p[0]} {p[1]} {p[2]}" for p in positions]))
 
 
@@ -58,4 +59,4 @@ def test_camera_distribution_sdf():
 
 
 if __name__ == '__main__':
-    test_camera_distribution_sdf()
+    test_camera_distribution()

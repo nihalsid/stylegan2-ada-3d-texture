@@ -1,26 +1,65 @@
 # stylegan2-ada-3d-texture
 
 Surface texture GAN.
-Configuration provided with hydra config file `config/stylegan2.yaml`. Once configured, train with:
+
+## Dependencies
+
+Install python requirements:
+
+```commandline
+pip install -r requirements.txt
+```
+
+Also, for differentiable rendering we use `nvdiffrast`. You'll need to install its dependencies:
+
+```bash
+sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+    pkg-config \
+    libglvnd0 \
+    libgl1 \
+    libglx0 \
+    libegl1 \
+    libgles2 \
+    libglvnd-dev \
+    libgl1-mesa-dev \
+    libegl1-mesa-dev \
+    libgles2-mesa-dev \
+    cmake \
+    curl
+```
+
+Install `nvdiffrast` from official source:
+
+```bash
+cd ~ 
+git clone git@github.com:NVlabs/nvdiffrast.git
+cd nvdiffrast
+pip install .
+```
 
 ## Dataset
 
+From project root execute:
 ```bash
-create symlinks
-wget xyz
-unzip xyz
+mkdir data
+cd data
+wget https://www.dropbox.com/s/imypy8erqg92p7m/photoshape-data.zip
+unzip photoshape-data.zip
 ```
 
 ## Output Directories
 
+Create a symlink `runs` in project root from a directory `OUTPUTDIR` where outputs would be stored  
 ```bash
-symlinks
+ln -s OUTPUTDIR runs
 ```
 
 ## Running Experiments
 
+Configuration provided with hydra config file `config/stylegan2.yaml`. Example training:
+
 ```bash
-python trainer/train_stylegan.py wandb_main=True
+python trainer/train_stylegan_real_feature.py wandb_main=True val_check_interval=5 experiment=test_run lr_d=0.001 sanity_steps=1 lambda_gp=14 image_size=512 batch_size=4 num_mapping_layers=5 views_per_sample=2 g_channel_base=32768 random_bg=grayscale num_vis_images=256 preload=False dataset_path=data/Photoshape/shapenet-chairs-manifold-highres-part_processed_color mesh_path=data/Photoshape/shapenet-chairs-manifold-highres pairmeta_path=data/Photoshape-model/metadata/pairs.json image_path=data/Photoshape/exemplars mask_path=data/Photoshape/exemplars_mask
 ```
 
 ## Configuration

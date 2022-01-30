@@ -60,7 +60,7 @@ class StyleGAN2Trainer(pl.LightningModule):
 
     def forward(self, batch, limit_batch_size=False):
         z = self.latent(limit_batch_size)
-        c = batch['shape'][-1].reshape((self.config.views_per_sample, -1, 256)).mean(1)
+        c = batch['shape'][-1].reshape((self.config.batch_size, -1, 256)).mean(1)
         w = self.get_mapped_latent(z, c, 0.9)
         fake = self.G.synthesis(batch['graph_data'], w, batch['shape'])
         return fake, w
@@ -172,7 +172,7 @@ class StyleGAN2Trainer(pl.LightningModule):
                 batch = to_device(batch, self.device)
                 self.set_shape_codes(batch)
                 shape = batch['shape']
-                condition = batch['shape'][-1].reshape((self.config.views_per_sample, -1, 256)).mean(1)
+                condition = batch['shape'][-1].reshape((self.config.batch_size, -1, 256)).mean(1)
                 real_render = batch['real'].cpu()
                 fake_render = self.render(self.G(batch['graph_data'], latents[iter_idx % len(latents)].to(self.device), shape, c=condition, noise_mode='const'), batch, use_bg_color=False).cpu()
                 real_render = self.train_set.cspace_convert_back(real_render)
@@ -223,7 +223,7 @@ class StyleGAN2Trainer(pl.LightningModule):
             z = z.to(self.device)
             eval_batch = to_device(next(grid_loader), self.device)
             self.set_shape_codes(eval_batch)
-            condition = eval_batch['shape'][-1].reshape((self.config.views_per_sample, -1, 256)).mean(1)
+            condition = eval_batch['shape'][-1].reshape((self.config.batch_size, -1, 256)).mean(1)
             fake = self.render(self.G(eval_batch['graph_data'], z, eval_batch['shape'], c=condition, noise_mode='const'), eval_batch, use_bg_color=False).cpu()
             fake = self.train_set.cspace_convert_back(fake)
             if output_dir_fid is not None:
@@ -242,7 +242,7 @@ class StyleGAN2Trainer(pl.LightningModule):
                 z = z.to(self.device)
                 eval_batch = to_device(next(grid_loader), self.device)
                 self.set_shape_codes(eval_batch)
-                condition = eval_batch['shape'][-1].reshape((self.config.views_per_sample, -1, 256)).mean(1)
+                condition = eval_batch['shape'][-1].reshape((self.config.batch_size, -1, 256)).mean(1)
                 generated_colors = torch.clamp(self.G(eval_batch['graph_data'], z, eval_batch['shape'], c=condition, noise_mode='const'), -1, 1)
                 generated_colors = self.train_set.cspace_convert_back(generated_colors) * 0.5 + 0.5
                 for bidx in range(generated_colors.shape[0] // self.config.num_faces[0]):

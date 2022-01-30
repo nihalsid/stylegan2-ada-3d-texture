@@ -24,6 +24,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.dataset_directory = Path(config.dataset_path)
         self.mesh_directory = Path(config.mesh_path)
         self.image_size = config.image_size
+        self.camera_noise = config.camera_noise
         self.real_images = {x.name.split('.')[0]: x for x in Path(config.image_path).iterdir() if x.name.endswith('.jpg') or x.name.endswith('.png')}
         self.masks = {x: Path(config.mask_path) / self.real_images[x].name for x in self.real_images}
         self.erode = config.erode
@@ -125,7 +126,9 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         for c_i, c_v in zip(image_selections, sampled_view):
             images.append(self.get_real_image(self.meta_to_pair(c_i)))
             masks.append(self.get_real_mask(self.meta_to_pair(c_i)))
-            perspective_cam = spherical_coord_to_cam(c_i['fov'], c_v['azimuth'], c_v['elevation'])
+            azimuth = c_v['azimuth'] + (random.random() - 0.5) * self.camera_noise
+            elevation = c_v['elevation'] + (random.random() - 0.5) * self.camera_noise
+            perspective_cam = spherical_coord_to_cam(c_i['fov'], azimuth, elevation)
             projection_matrix = torch.from_numpy(perspective_cam.projection_mat()).float()
             cam_position = torch.from_numpy(np.linalg.inv(perspective_cam.view_mat())[:3, 3]).float()
             view_matrix = torch.from_numpy(perspective_cam.view_mat()).float()

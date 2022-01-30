@@ -21,3 +21,6 @@ setuptools~=49.6.0
 matplotlib
 opencv-python~=3.4.9.33
 scikit-image~=0.19.1
+ninja
+imageio
+imageio-ffmpeg
