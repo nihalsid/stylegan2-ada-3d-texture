@@ -12,7 +12,6 @@ pytorch-lightning
 tqdm~=4.48.2
 torchmetrics~=0.6.0
 pyrender
-trimesh~=3.9.29
 scipy~=1.7.1
 setuptools~=49.6.0
 matplotlib

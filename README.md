@@ -11,6 +11,14 @@ pip install -r requirements.txt
 pip install torch==1.10.2+cu113 torchvision==0.11.3+cu113 torchaudio==0.10.2+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html
 ```
 
+Install trimesh from our fork:
+```bash
+cd ~
+git clone git@github.com:nihalsid/trimesh.git
+cd trimesh
+python setup.py install
+```
+
 Also, for differentiable rendering we use `nvdiffrast`. You'll need to install its dependencies:
 
 ```bash
