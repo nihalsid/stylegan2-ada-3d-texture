@@ -139,7 +139,10 @@ class StyleGAN2Trainer(pl.LightningModule):
         if random.random() <= self.p_synthetic:
             return self.render(batch['y'], batch, use_bg_color)
         else:
-            return batch['real'] * batch['mask'].expand(-1, 3, -1, -1) + (1 - batch['mask']).expand(-1, 3, -1, -1) * batch['bg'][:, None, None, None]
+            if use_bg_color:
+                return batch['real'] * batch['mask'].expand(-1, 3, -1, -1) + (1 - batch['mask']).expand(-1, 3, -1, -1) * batch['bg'][:, None, None, None]
+            else:
+                return batch['real']
 
     def training_step(self, batch, batch_idx):
         self.set_shape_codes(batch)
