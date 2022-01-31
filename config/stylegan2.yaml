@@ -49,6 +49,7 @@ ada_fixed: False
 g_channel_base: 16384
 d_channel_base: 16384
 features: normal
+p_synthetic: 1.0
 #normal
 #position
 #position+normal

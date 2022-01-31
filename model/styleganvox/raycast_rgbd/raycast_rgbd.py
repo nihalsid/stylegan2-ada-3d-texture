@@ -35,7 +35,8 @@ class RayCastRGBDFunction(Function):
 
 
 class RaycastRGBD(nn.Module):
-    def __init__(self, batch_size, dims3d, width, height, depth_min, depth_max, thresh_sample_dist, ray_increment, max_num_frames=1, max_num_locs_per_sample=200000, max_pixels_per_voxel=64):#32):
+
+    def __init__(self, device, batch_size, dims3d, width, height, depth_min, depth_max, thresh_sample_dist, ray_increment, max_num_frames=1, max_num_locs_per_sample=200000, max_pixels_per_voxel=64):#32):
         super(RaycastRGBD, self).__init__()
         #TODO CAN MAKE THIS TRIVIALLY MORE MEMORY EFFICIENT
         self.dims3d = dims3d
@@ -47,15 +48,15 @@ class RaycastRGBD(nn.Module):
         self.ray_increment = ray_increment
         self.max_num_locs_per_sample = max_num_locs_per_sample
         # pre-allocate raycast_color outputs
-        self.image_depth = torch.zeros(batch_size*max_num_frames, height, width).cuda()
-        self.image_normal = torch.zeros(batch_size*max_num_frames, height, width, 3).cuda()
-        self.image_color = torch.zeros(batch_size*max_num_frames, height, width, 3).cuda()
-        self.mapping3dto2d = torch.zeros(batch_size*max_num_frames*max_num_locs_per_sample, max_pixels_per_voxel, dtype=torch.int).cuda() # no color trilerp -> only pixel index here
-        self.mapping3dto2d_num = torch.zeros(batch_size*max_num_frames*max_num_locs_per_sample, dtype=torch.int).cuda() # counter for self.mapping3dto2d
-        self.sparse_mapping = torch.zeros(batch_size, dims3d[0], dims3d[1], dims3d[2], dtype=torch.int).cuda()
-        self.d_color = torch.zeros(batch_size*max_num_locs_per_sample, 3).cuda()
-        self.d_normal = torch.zeros(batch_size*max_num_locs_per_sample, 3).cuda()
-        self.d_depth = torch.zeros(batch_size*max_num_locs_per_sample, 1).cuda()
+        self.image_depth = torch.zeros(batch_size*max_num_frames, height, width).to(device)
+        self.image_normal = torch.zeros(batch_size*max_num_frames, height, width, 3).to(device)
+        self.image_color = torch.zeros(batch_size*max_num_frames, height, width, 3).to(device)
+        self.mapping3dto2d = torch.zeros(batch_size*max_num_frames*max_num_locs_per_sample, max_pixels_per_voxel, dtype=torch.int).to(device) # no color trilerp -> only pixel index here
+        self.mapping3dto2d_num = torch.zeros(batch_size*max_num_frames*max_num_locs_per_sample, dtype=torch.int).to(device) # counter for self.mapping3dto2d
+        self.sparse_mapping = torch.zeros(batch_size, dims3d[0], dims3d[1], dims3d[2], dtype=torch.int).to(device)
+        self.d_color = torch.zeros(batch_size*max_num_locs_per_sample, 3).to(device)
+        self.d_normal = torch.zeros(batch_size*max_num_locs_per_sample, 3).to(device)
+        self.d_depth = torch.zeros(batch_size*max_num_locs_per_sample, 1).to(device)
 
     def get_max_num_locs_per_sample(self):
         return self.max_num_locs_per_sample
@@ -87,9 +88,9 @@ class RaycastOcc(nn.Module):
 
 class Raycast2DHandler:
 
-    def __init__(self, batch_size, dims3d, render_shape, voxelsize, trunc, max_num_frames=1):
+    def __init__(self, device, batch_size, dims3d, render_shape, voxelsize, trunc, max_num_frames=1):
         self.truncation = trunc
-        self.raycaster = RaycastRGBD(batch_size, dims3d, render_shape[1], render_shape[0],
+        self.raycaster = RaycastRGBD(device, batch_size, dims3d, render_shape[1], render_shape[0],
                                      depth_min=0.1 / voxelsize, depth_max=6.0 / voxelsize,
                                      thresh_sample_dist=50.5*0.3*trunc, ray_increment=0.3*trunc,
                                      max_num_frames=max_num_frames, max_num_locs_per_sample=96*96*96, max_pixels_per_voxel=96)

@@ -1,12 +1,14 @@
 from pathlib import Path
 
 import hydra
+from torch.utils.data import DataLoader
 from torchvision.utils import save_image
 from tqdm import tqdm
 import torch
 
 from dataset.mesh_real_features import FaceGraphMeshDataset
 from dataset import GraphDataLoader, to_device, to_vertex_colors_scatter
+from dataset.mesh_real_sdfgrid import SDFGridDataset
 from model.augment import AugmentPipe
 from model.differentiable_renderer import DifferentiableRenderer
 from model.graph import pool, unpool
@@ -84,7 +86,36 @@ def test_masks(config):
 
 @hydra.main(config_path='../config', config_name='stylegan2')
 def test_grid_dataloader(config):
-    pass
+    from model.styleganvox.generator import Generator
+    from model.styleganvox import SDFEncoder
+    from model.styleganvox.raycast_rgbd.raycast_rgbd import Raycast2DHandler
+    from PIL import Image
+    import numpy as np
+    batch_size, render_shape = 4, (config.image_size, config.image_size)
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, 64, 3).cuda()
+    E = SDFEncoder(1).cuda()
+    dataset = SDFGridDataset(config)
+    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=0)
+    Path("runs/images_sdf").mkdir(exist_ok=True)
+    dims = (64, 64, 64)
+    voxel_size = 0.03125
+    trunc = 5 * voxel_size
+    raycast_handler = Raycast2DHandler(torch.device("cuda"), batch_size, dims, render_shape, voxel_size, trunc)
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(tqdm(dataloader)):
+            batch = to_device(batch, torch.device("cuda"))
+            shape = E(batch["x"])
+            fake_grid = G(torch.randn(batch_size, 512).cuda(), shape, noise_mode='const')
+            r_color, r_depth, r_normals = raycast_handler.raycast_sdf(batch['x'], batch['y'],
+                                                                      batch['view'], batch['intrinsic'])
+            r_color = r_color.permute((0, 3, 1, 2)).cpu()
+            r_color = r_color.permute((0, 2, 3, 1))
+            r_color = (r_color + 1) / 2
+            for i in range(r_color.shape[0]):
+                color_i = r_color[i].numpy()
+                color_i[color_i == -float('inf')] = 1
+                color_i = color_i * 255
+                Image.fromarray(color_i.astype(np.uint8)).save(f"runs/images_sdf/render_{batch_idx * 8 + i}.jpg")
 
 
 if __name__ == '__main__':

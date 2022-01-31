@@ -144,3 +144,115 @@ def modulated_conv3d(x, weight, styles, padding=0, demodulate=True):
     x = torch.nn.functional.conv3d(x, w, padding=padding, groups=batch_size)
     x = x.reshape(batch_size, -1, *x.shape[2:])
     return x
+
+
+class Conv3DResBlock(torch.nn.Module):
+
+    def __init__(self, nf_in, nf_out, activation):
+        super().__init__()
+        self.nf_in = nf_in
+        self.nf_out = nf_out
+        self.norm_0 = torch.nn.BatchNorm3d(nf_in)
+        self.conv_0 = torch.nn.Conv3d(nf_in, nf_out, kernel_size=3, padding=1)
+        self.norm_1 = torch.nn.BatchNorm3d(nf_out)
+        self.conv_1 = torch.nn.Conv3d(nf_out, nf_out, kernel_size=3, padding=1)
+        self.activation = activation
+        if nf_in != nf_out:
+            self.nin_shortcut = torch.nn.Conv3d(nf_out, nf_out, kernel_size=1, padding=0)
+
+    def forward(self, x):
+        h = x
+        h = self.norm_0(h)
+        h = self.activation(h)
+        h = self.conv_0(h)
+
+        h = self.norm_1(h)
+        h = self.activation(h)
+        h = self.conv_1(h)
+
+        if self.nf_in != self.nf_out:
+            x = self.nin_shortcut(x)
+
+        return x + h
+
+
+class Conv3DBlock(torch.nn.Module):
+
+    def __init__(self, nf_in, nf_out, activation):
+        super().__init__()
+        self.nf_in = nf_in
+        self.nf_out = nf_out
+        self.norm_0 = torch.nn.BatchNorm3d(nf_in)
+        self.conv_0 = torch.nn.Conv3d(nf_in, nf_out, kernel_size=3, padding=1)
+        self.activation = activation
+
+    def forward(self, x):
+        h = x
+        h = self.norm_0(h)
+        h = self.activation(h)
+        h = self.conv_0(h)
+        return h
+
+
+class SDFEncoder(torch.nn.Module):
+    def __init__(self, in_channels, layer_dims=(32, 64, 64, 128, 128, 256, 256, 256)):
+        super().__init__()
+        self.activation = torch.nn.LeakyReLU()
+        self.enc_conv_in = torch.nn.Conv3d(in_channels, layer_dims[0], 1)
+        self.down_0_block_0 = Conv3DBlock(layer_dims[0], layer_dims[1], self.activation)
+        self.down_0_block_1 = Conv3DBlock(layer_dims[1], layer_dims[2], self.activation)
+        self.down_1_block_0 = Conv3DBlock(layer_dims[2], layer_dims[3], self.activation)
+        self.down_2_block_0 = Conv3DBlock(layer_dims[3], layer_dims[4], self.activation)
+        self.down_3_block_0 = Conv3DBlock(layer_dims[4], layer_dims[5], self.activation)
+        self.down_4_block_0 = Conv3DBlock(layer_dims[5], layer_dims[6], self.activation)
+        self.enc_mid_block_0 = Conv3DBlock(layer_dims[6], layer_dims[7], self.activation)
+        self.enc_out_conv = torch.nn.Conv3d(layer_dims[7], layer_dims[7], kernel_size=3, padding=1)
+        self.enc_out_norm = torch.nn.BatchNorm3d(layer_dims[7])
+
+    def forward(self, x):
+        level_feats = []
+        pool_ctr = 0
+        x = self.enc_conv_in(x)
+        x = self.down_0_block_0(x)
+        x = self.down_0_block_1(x)
+        level_feats.append(x)
+        x = torch.nn.functional.interpolate(x, scale_factor=0.5, mode='trilinear', recompute_scale_factor=False, align_corners=True)
+        pool_ctr += 1
+
+        x = self.down_1_block_0(x)
+        level_feats.append(x)
+        x = torch.nn.functional.interpolate(x, scale_factor=0.5, mode='trilinear', recompute_scale_factor=False, align_corners=True)
+        pool_ctr += 1
+
+        x = self.down_2_block_0(x)
+        level_feats.append(x)
+        x = torch.nn.functional.interpolate(x, scale_factor=0.5, mode='trilinear', recompute_scale_factor=False, align_corners=True)
+        pool_ctr += 1
+
+        x = self.down_3_block_0(x)
+        level_feats.append(x)
+        x = torch.nn.functional.interpolate(x, scale_factor=0.5, mode='trilinear', recompute_scale_factor=False, align_corners=True)
+        pool_ctr += 1
+
+        x = self.down_4_block_0(x)
+        # level_feats.append(x)
+        # x = torch.nn.functional.interpolate(x, scale_factor=0.5, mode='trilinear', recompute_scale_factor=False, align_corners=True)
+        # pool_ctr += 1
+
+        x = self.enc_mid_block_0(x)
+        x = self.enc_out_norm(x)
+        x = self.activation(x)
+        x = self.enc_out_conv(x)
+
+        level_feats.append(x)
+
+        return level_feats
+
+
+if __name__ == '__main__':
+    model = SDFEncoder(1).cuda()
+    x = torch.randn(8, 1, 64, 64, 64).cuda()
+    ll = model(x)
+    for y in ll:
+        print(y.shape)
+

@@ -135,3 +135,4 @@ def modulated_conv2d(x, weight, styles, padding=0, demodulate=True):
     x = torch.nn.functional.conv2d(x, w, padding=padding, groups=batch_size)
     x = x.reshape(batch_size, -1, *x.shape[2:])
     return x
+
