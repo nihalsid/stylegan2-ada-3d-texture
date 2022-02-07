@@ -80,14 +80,13 @@ def create_uv_mapping(proc, num_proc):
             pixel_coordinates = pixel_coordinates[valid_pos]
             kdtree = scipy.spatial.cKDTree(all_pos[valid_pos])
             dist, indices = kdtree.query(np.array(tmesh.vertices), k=1)
-            dmask = dist < selected_mapping[:, 3]
+            dmask = selected_mapping[:, 3] - dist > 0.02
             selected_mapping[dmask, 1:3] = pixel_coordinates[indices, :][dmask, :]
             selected_mapping[dmask, 0] = mp_idx
             selected_mapping[dmask, 3] = dist[dmask]
 
         np.save(str(output_path / f'{mesh.stem}.npy'), selected_mapping[:, 0:3])
         print(mesh)
-        # break
 
 
 @hydra.main(config_path='../config', config_name='stylegan2')
@@ -118,8 +117,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-n', '--num_proc', default=1, type=int)
     parser.add_argument('-p', '--proc', default=0, type=int)
-    # args = parser.parse_args()
+    args = parser.parse_args()
 
-    # create_uv_mapping(args.proc, args.num_proc)
+    create_uv_mapping(args.proc, args.num_proc)
     # create_silhouttes()
-    render_with_uv()
+    # render_with_uv()

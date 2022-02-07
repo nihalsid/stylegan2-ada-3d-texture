@@ -4,7 +4,7 @@ import torch
 from torch import nn
 from torch.autograd import Function
 
-import model.styleganvox.raycast_rgbd.raycast_rgbd_cuda as raycast_rgbd_cuda
+import model.raycast_rgbd.raycast_rgbd_cuda as raycast_rgbd_cuda
 
 
 class RayCastRGBDFunction(Function):
@@ -102,6 +102,22 @@ class Raycast2DHandler:
         sparse_color = color[locs[:, -1], :, locs[:, 2], locs[:, 1], locs[:, 0]].contiguous()
         sparse_normals = compute_normals_from_sdf(sdf, locs, torch.inverse(view_matrix))
         r_color, r_depth, r_normal = self.raycaster(locs, sparse_sdf, sparse_color, sparse_normals, view_matrix, intrinsic_matrix)
+        return r_color.clone(), r_depth.clone(), r_normal.clone()
+
+
+class Raycast2DSparseHandler:
+
+    def __init__(self, device, batch_size, dims3d, render_shape, voxelsize, trunc, max_num_frames=1):
+        self.truncation = trunc
+        self.raycaster = RaycastRGBD(device, batch_size, dims3d, render_shape[1], render_shape[0],
+                                     depth_min=0.1 / voxelsize, depth_max=6.0 / voxelsize,
+                                     thresh_sample_dist=50.5*0.3*trunc, ray_increment=0.3*trunc,
+                                     max_num_frames=max_num_frames, max_num_locs_per_sample=96*96*96, max_pixels_per_voxel=96)
+
+    def raycast_sdf(self, sdf_dense, locs, sparse_sdf, sparse_color, view_matrix, intrinsic_matrix):
+        locs = torch.cat([locs[:, 1:2], locs[:, 2:3], locs[:, 3:4], locs[:, 0:1]], 1).contiguous().long()
+        sparse_normals = compute_normals_from_sdf(sdf_dense, locs, torch.inverse(view_matrix))
+        r_color, r_depth, r_normal = self.raycaster(locs, sparse_sdf.contiguous(), sparse_color, sparse_normals, view_matrix, intrinsic_matrix)
         return r_color.clone(), r_depth.clone(), r_normal.clone()
 
 

@@ -1,31 +1,34 @@
 import json
 import random
+import trimesh
 from collections import defaultdict
 from pathlib import Path
 import numpy as np
-import math
 
 import torch
 import torchvision.transforms as T
 from torchvision.io import read_image
 from tqdm import tqdm
 
-from scipy.spatial.transform import Rotation
+from util.camera import spherical_coord_to_cam
 
 
 class SDFGridDataset(torch.utils.data.Dataset):
 
     def __init__(self, config, limit_dataset_size=None):
         self.dataset_directory = Path(config.dataset_path)
-        self.mesh_directory = Path(config.mesh_path)
-        self.image_size = config.image_size
+        self.mesh_directory = Path(config.dataset_path)
+        self.image_size = config.img_size
         self.bg_color = config.random_bg
         self.real_images = {x.name.split('.')[0]: x for x in Path(config.image_path).iterdir() if x.name.endswith('.jpg') or x.name.endswith('.png')}
         self.masks = {x: Path(config.mask_path) / self.real_images[x].name for x in self.real_images}
         self.items = sorted(list(x.stem for x in Path(config.dataset_path).iterdir())[:limit_dataset_size])
+        problem_files = {"shape03283_rank00_pair26092", "shape04324_rank00_pair46014", "shape04142_rank00_pair284841", "shape03765_rank01_pair164915", "shape03704_rank02_pair249529", "shape06471_rank00_pair221396"}
+        self.items = [x for x in self.items if x not in problem_files]
         self.views_per_sample = 1
         self.erode = config.erode
-        self.real_pad = 150
+        self.real_pad = 100
+        self.color_generator = random_color if config.random_bg == 'color' else (random_grayscale if config.random_bg == 'grayscale' else white)
         self.pair_meta, self.all_views = self.load_pair_meta(config.pairmeta_path)
         self.real_images_preloaded, self.masks_preloaded = {}, {}
         if config.preload:
@@ -36,38 +39,48 @@ class SDFGridDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         selected_item = self.items[idx]
+        mesh = trimesh.load(self.dataset_directory / selected_item / "model_normalized.obj", process=False)
+        faces = torch.from_numpy(mesh.triangles.mean(1)).float() * 2
+        vertices = torch.from_numpy(mesh.vertices).float()
+        vctr = torch.tensor(list(range(vertices.shape[0]))).long()
+        indices = torch.from_numpy(mesh.faces).int()
         sdf_grid = torch.from_numpy(np.load(self.dataset_directory / selected_item / "064.npy")).unsqueeze(0) - 0.0075
-        color_grid = 2 * torch.from_numpy(np.load(self.dataset_directory / selected_item / "064_if.npy")).permute((3, 0, 1, 2)) / 255.0 - 1
-        real_sample, masks, view_matrices, projection_matrices = self.get_image_and_view(selected_item)
-        if self.bg_color == 'white':
-            bg = torch.tensor(1.).float()
-        else:
-            bg = torch.tensor(random.random() * 2 - 1).float()
+        color_grid = torch.from_numpy(np.load(self.dataset_directory / selected_item / "064_if.npy")).permute((3, 0, 1, 2)) / 255.0
+        tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
+        real_sample, masks, mvp = self.get_image_and_view(selected_item)
+        background = self.color_generator(self.views_per_sample)
         return {
             "name": selected_item,
-            "x": sdf_grid.float(),
-            "y": color_grid.float(),
-            "view": view_matrices[0],
-            "intrinsic": projection_matrices[0],
-            "real": real_sample[0],
-            "mask": masks[0],
-            "bg": bg
+            "sdf_x": sdf_grid.float(),
+            "csdf_y": color_grid.float(),
+            "faces": faces,
+            "vertex_ctr": vctr,
+            "vertices": vertices,
+            "indices_quad": indices,
+            "indices": tri_indices,
+            "ranges": torch.tensor([0, tri_indices.shape[0]]).int(),
+            "mvp": mvp,
+            "real": real_sample[0].unsqueeze(0),
+            "mask": masks[0].unsqueeze(0),
+            "bg": torch.cat([background, torch.ones([background.shape[0], 1, 1, 1])], dim=1)
         }
 
     def get_image_and_view(self, shape):
         shape_id = int(shape.split('_')[0].split('shape')[1])
         image_selections = self.get_image_selections(shape_id)
         view_selections = random.sample(self.all_views, self.views_per_sample)
-        images, masks, view_matrices, projection_matrices = [], [], [], []
+        images, masks, cameras = [], [], []
         for c_i, c_v in zip(image_selections, view_selections):
             images.append(self.get_real_image(self.meta_to_pair(c_i)))
             masks.append(self.get_real_mask(self.meta_to_pair(c_i)))
-            view_matrix, projection_matrix = self.get_camera(c_v['fov'], c_v['azimuth'], c_v['elevation'])
-            view_matrices.append(view_matrix)
-            projection_matrices.append(projection_matrix)
+            perspective_cam = spherical_coord_to_cam(c_i['fov'], c_i['azimuth'], c_i['elevation'])
+            projection_matrix = torch.from_numpy(perspective_cam.projection_mat()).float()
+            view_matrix = torch.from_numpy(perspective_cam.view_mat()).float()
+            cameras.append(torch.matmul(projection_matrix, view_matrix))
         image = torch.cat(images, dim=0)
         masks = torch.cat(masks, dim=0)
-        return image, masks, torch.stack(view_matrices, dim=0), torch.stack(projection_matrices, dim=0)
+        mvp = torch.stack(cameras, dim=0)
+        return image, masks, mvp
 
     def get_real_image(self, name):
         if name not in self.real_images_preloaded.keys():
@@ -113,7 +126,7 @@ class SDFGridDataset(torch.utils.data.Dataset):
     def process_real_image(self, path):
         resize = T.Resize(size=(self.image_size, self.image_size))
         pad = T.Pad(padding=(self.real_pad, self.real_pad), fill=1)
-        t_image = resize(pad(read_image(str(path)).float() / 127.5 - 1))
+        t_image = resize(pad(read_image(str(path)).float() / 255.0))
         return t_image.unsqueeze(0)
 
     def load_pair_meta(self, pairmeta_path):
@@ -135,23 +148,22 @@ class SDFGridDataset(torch.utils.data.Dataset):
     def meta_to_pair(c):
         return f'shape{c["shape_id"]:05d}_rank{(c["rank"] - 1):02d}_pair{c["id"]}'
 
-    def get_camera(self, fov, azimuth, elevation):
-        y_angle = azimuth * 180 / math.pi
-        x_angle = 90 - elevation * 180 / math.pi
-        z_angle = 180
-        camera_rot = np.eye(4)
-        camera_rot[:3, :3] = Rotation.from_euler('x', x_angle, degrees=True).as_matrix() @ Rotation.from_euler('z', z_angle, degrees=True).as_matrix() @ Rotation.from_euler('y', y_angle, degrees=True).as_matrix()
-        camera_translation = np.eye(4)
-        camera_translation[:3, 3] = np.array([0, 0, 1.75])
-        camera_pose = camera_translation @ camera_rot
-        translate = torch.tensor([[1.0, 0, 0, 32], [0, 1.0, 0, 32], [0, 0, 1.0, 32], [0, 0, 0, 1.0]]).float()
-        scale = torch.tensor([[32.0, 0, 0, 0], [0, 32.0, 0, 0], [0, 0, 32.0, 0], [0, 0, 0, 1.0]]).float()
-        world2grid = translate @ scale
-        view_matrix = world2grid @ torch.linalg.inv(torch.from_numpy(camera_pose).float())
-        camera_intrinsics = torch.zeros((4,))
-        f = self.image_size / (2 * np.tan(fov * np.pi / 180 / 2.0))
-        camera_intrinsics[0] = f
-        camera_intrinsics[1] = f
-        camera_intrinsics[2] = self.image_size / 2
-        camera_intrinsics[3] = self.image_size / 2
-        return view_matrix, camera_intrinsics
+
+def random_color(num_views):
+    randoms = []
+    for i in range(num_views):
+        r, g, b = random.randint(0, 255) / 255.0, random.randint(0, 255) / 255.0, random.randint(0, 255) / 255.0
+        randoms.append(torch.from_numpy(np.array([r, g, b]).reshape((1, 3, 1, 1))).float())
+    return torch.cat(randoms, dim=0)
+
+
+def random_grayscale(num_views):
+    randoms = []
+    for i in range(num_views):
+        c = random.randint(0, 255) / 255.0
+        randoms.append(torch.from_numpy(np.array([c, c, c]).reshape((1, 3, 1, 1))).float())
+    return torch.cat(randoms, dim=0)
+
+
+def white(num_views):
+    return torch.from_numpy(np.array([1, 1, 1]).reshape((1, 3, 1, 1))).expand(num_views, -1, -1, -1).float()

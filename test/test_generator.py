@@ -1,10 +1,14 @@
 import time
+from pathlib import Path
+
 import torch
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 import hydra
 
 from dataset import GraphDataLoader, to_device
 from dataset.mesh_real_features import FaceGraphMeshDataset
+from dataset.mesh_real_sdfgrid_sparse import SparseSDFGridDataset, Collater
 from model import modulated_conv2d
 from model.graph_generator import Generator
 from model.graph import modulated_face_conv, GraphEncoder
@@ -229,5 +233,58 @@ def test_generator_u_textureconv(config):
         break
 
 
+@hydra.main(config_path='../config', config_name='stylegan2')
+def test_sparse_generator(config):
+    from model.raycast_rgbd.raycast_rgbd import Raycast2DSparseHandler
+    from model.styleganvox_sparse.generator import Generator
+    from model.styleganvox_sparse import SmoothUpsampleSparse, SDFEncoder
+    from PIL import Image
+    import numpy as np
+    batch_size, render_shape = 2, (config.image_size, config.image_size)
+    dataset = SparseSDFGridDataset(config)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=Collater([], []))
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, 64, 3).cuda()
+    E = SDFEncoder(1).cuda()
+    print_model_parameter_count(G)
+    print_model_parameter_count(E)
+
+    # interpolator = SmoothUpsampleSparse().cuda()
+    dims = (128, 128, 128)
+    voxel_size = 0.015625
+    trunc = 5 * voxel_size
+    Path("runs/images_sparsesdf").mkdir(exist_ok=True)
+    raycast_handler = Raycast2DSparseHandler(torch.device("cuda"), batch_size, dims, render_shape, voxel_size, trunc)
+    print('Starting dataloading...')
+    for batch_idx, batch in enumerate(tqdm(dataloader)):
+        batch = to_device(batch, torch.device("cuda"))
+        shape = E(batch['x_dense_064'])
+        z = torch.randn(batch_size, 512).to(torch.device("cuda:0"))
+        w = G.mapping(z)
+        t0 = time.time()
+        fake = G.synthesis(w, batch['sparse_data_064'][0].long(), batch['sparse_data'][0].long(), shape)
+        print('Time for fake:', time.time() - t0, ', shape:', fake.shape)
+        # sanity test backwards
+        loss = torch.abs(fake - torch.rand_like(fake)).mean()
+        t0 = time.time()
+        loss.backward()
+        print('Time for backwards:', time.time() - t0)
+        print('backwards done')
+        print_module_summary(G.synthesis, [w, batch['sparse_data_064'][0].long(), batch['sparse_data'][0].long(), shape])
+        # r_color, r_depth, r_normals = raycast_handler.raycast_sdf(batch["x_dense"], batch['sparse_data'][0], batch['sparse_data'][1],
+        #                                                           batch['sparse_data'][2], batch['view'], batch['intrinsic'])
+        r_color, r_depth, r_normals = raycast_handler.raycast_sdf(batch["x_dense"], batch['sparse_data'][0], batch['sparse_data'][1],
+                                                                  fake, batch['view'], batch['intrinsic'])
+        r_color = r_color.permute((0, 3, 1, 2)).cpu()
+        r_color = r_color.permute((0, 2, 3, 1))
+        r_color = (r_color + 1) / 2
+        with torch.no_grad():
+            for i in range(r_color.shape[0]):
+                color_i = r_color[i].numpy()
+                color_i[color_i == -float('inf')] = 0
+                color_i = color_i * 255
+                Image.fromarray(color_i.astype(np.uint8)).save(f"runs/images_sparsesdf/render_{batch_idx * 8 + i}.jpg")
+        break
+
+
 if __name__ == '__main__':
-    test_generator_u_spade()
+    test_sparse_generator()

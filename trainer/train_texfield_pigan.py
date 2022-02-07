@@ -6,20 +6,19 @@ import torch
 import hydra
 import pytorch_lightning as pl
 from pytorch_lightning.utilities import rank_zero_only
-from torch.utils.data import DataLoader
+from dataset import GraphDataLoader
 from torch_ema import ExponentialMovingAverage
 from torchvision.utils import save_image
 from cleanfid import fid
-import random
 
-from dataset import to_device
-from dataset.mesh_real_sdfgrid import SDFGridDataset
+from dataset import to_device, to_vertex_colors_scatter
+from dataset.mesh_real_pigan import SDFGridDataset
 from model.augment import AugmentPipe
+from model.differentiable_renderer import DifferentiableRenderer
+from model.pigan.discriminator import ProgressiveDiscriminator
+from model.pigan.siren import TALLSIREN
 from model.styleganvox import SDFEncoder
-from model.styleganvox.generator import Generator
-from model.discriminator import Discriminator
 from model.loss import PathLengthPenalty, compute_gradient_penalty
-from model.raycast_rgbd.raycast_rgbd import Raycast2DHandler
 from trainer import create_trainer
 from util.timer import Timer
 
@@ -31,7 +30,7 @@ torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
 
 
-class StyleGAN2Trainer(pl.LightningModule):
+class PiGANTrainer(pl.LightningModule):
 
     def __init__(self, config):
         super().__init__()
@@ -39,16 +38,13 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.config = config
         self.train_set = SDFGridDataset(config)
         self.val_set = SDFGridDataset(config, config.num_eval_images)
-        self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, 64, 3)
-        self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
+        self.G = TALLSIREN(3, z_dim=config.latent_dim, hidden_dim=512, shape_dim=256)
+        self.D = ProgressiveDiscriminator()
         self.E = SDFEncoder(1)
         self.R = None
         self.p_synthetic = config.p_synthetic
         self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size, config.views_per_sample, config.colorspace)
-        # print_module_summary(self.G, (torch.zeros(self.config.batch_size, self.config.latent_dim), ))
-        # print_module_summary(self.D, (torch.zeros(self.config.batch_size, 3, config.image_size, config.image_size), ))
         self.grid_z = torch.randn(config.num_eval_images, self.config.latent_dim)
-
         self.automatic_optimization = False
         self.path_length_penalty = PathLengthPenalty(0.01, 2)
         self.ema = None
@@ -63,14 +59,13 @@ class StyleGAN2Trainer(pl.LightningModule):
 
     def forward(self, batch, limit_batch_size=False):
         z = self.latent(limit_batch_size)
-        w = self.get_mapped_latent(z, 0.9)
-        fake = self.G.synthesis(w, batch['shape'])
-        return fake, w
+        fake = self.G(batch['faces'] + torch.randn_like(batch['faces']) * 0.0075, z, batch['shape'])
+        return fake
 
     def g_step(self, batch):
         g_opt = self.optimizers()[0]
         g_opt.zero_grad(set_to_none=True)
-        fake, w = self.forward(batch)
+        fake = self.forward(batch)
         p_fake = self.D(self.augment_pipe(self.render(fake, batch)))
         gen_loss = torch.nn.functional.softplus(-p_fake).mean()
         self.manual_backward(gen_loss)
@@ -78,24 +73,11 @@ class StyleGAN2Trainer(pl.LightningModule):
         step(g_opt, self.G)
         self.log("G", log_gen_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True, sync_dist=True)
 
-    def g_regularizer(self, batch):
-        g_opt = self.optimizers()[0]
-        for idx in range(len(batch['shape'])):
-            batch['shape'][idx] = batch['shape'][idx].detach()
-        g_opt.zero_grad(set_to_none=True)
-        fake, w = self.forward(batch)
-        plp = self.path_length_penalty(self.render(fake, batch), w)
-        if not torch.isnan(plp):
-            gen_loss = self.config.lambda_plp * plp * self.config.lazy_path_penalty_interval
-            self.log("rPLP", plp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
-            self.manual_backward(gen_loss)
-            step(g_opt, self.G)
-
     def d_step(self, batch):
         d_opt = self.optimizers()[1]
         d_opt.zero_grad(set_to_none=True)
 
-        fake, _ = self.forward(batch)
+        fake = self.forward(batch)
         p_fake = self.D(self.augment_pipe(self.render(fake.detach(), batch)))
         fake_loss = torch.nn.functional.softplus(p_fake).mean()
         self.manual_backward(fake_loss)
@@ -126,39 +108,28 @@ class StyleGAN2Trainer(pl.LightningModule):
         step(d_opt, self.D)
         self.log("rGP", gp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
 
-    def render(self, color_grid, batch, use_bg_color=True):
-        r_color, _, _ = self.R.raycast_sdf(batch['x'], color_grid.contiguous(), batch['view'], batch['intrinsic'])
-        if not use_bg_color:
-            r_color[r_color == -float('inf')] = 1
-        else:
-            for batch_idx in range(r_color.shape[0]):
-                r_color[batch_idx][r_color[batch_idx] == -float('inf')] = batch['bg'][batch_idx]
-        return r_color.permute((0, 3, 1, 2))
+    def render(self, face_colors, batch, use_bg_color=True):
+        rendered_color = self.R.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(face_colors.reshape(-1, 3), batch), batch["ranges"].cpu(), batch['bg'] if use_bg_color else None)
+        return rendered_color.permute((0, 3, 1, 2))
 
     def get_real(self, batch, use_bg_color=True):
-        if random.random() <= self.p_synthetic:
-            return self.render(batch['y'], batch, use_bg_color)
+        if use_bg_color:
+            return batch['real'] * batch['mask'].expand(-1, 3, -1, -1) + (1 - batch['mask']).expand(-1, 3, -1, -1) * batch['bg'][:, :3, :, :]
         else:
-            if use_bg_color:
-                return batch['real'] * batch['mask'].expand(-1, 3, -1, -1) + (1 - batch['mask']).expand(-1, 3, -1, -1) * batch['bg'][:, None, None, None]
-            else:
-                return batch['real']
+            return batch['real']
 
     def training_step(self, batch, batch_idx):
         self.set_shape_codes(batch)
         # optimize generator
         self.g_step(batch)
 
-        if self.global_step > self.config.lazy_path_penalty_after and (self.global_step + 1) % self.config.lazy_path_penalty_interval == 0:
-            self.g_regularizer(batch)
-
-        # torch.nn.utils.clip_grad_norm_(self.G.parameters(), max_norm=1.0)
-
         self.ema.update(self.G.parameters())
 
         # optimize discriminator
 
         self.d_step(batch)
+
+        torch.nn.utils.clip_grad_norm_(self.D.parameters(), 1)
 
         if (self.global_step + 1) % self.config.lazy_gradient_penalty_interval == 0:
             self.d_regularizer(batch)
@@ -188,7 +159,7 @@ class StyleGAN2Trainer(pl.LightningModule):
                 self.set_shape_codes(batch)
                 shape = batch['shape']
                 real_render = self.get_real(batch, use_bg_color=False).cpu()
-                fake_render = self.render(self.G(latents[iter_idx % len(latents)].to(self.device), shape, noise_mode='const'), batch, use_bg_color=False).cpu()
+                fake_render = self.render(self.G(batch['faces'], latents[iter_idx % len(latents)].to(self.device), shape), batch, use_bg_color=False).cpu()
                 save_image(real_render, odir_samples / f"real_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 save_image(fake_render, odir_samples / f"fake_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 for batch_idx in range(real_render.shape[0]):
@@ -202,40 +173,29 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.log(f"kid", kid_score, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True, sync_dist=True)
         shutil.rmtree(odir_real.parent)
 
-    def get_mapped_latent(self, z, style_mixing_prob):
-        if torch.rand(()).item() < style_mixing_prob:
-            cross_over_point = int(torch.rand(()).item() * self.G.mapping.num_ws)
-            w1 = self.G.mapping(z[0])[:, :cross_over_point, :]
-            w2 = self.G.mapping(z[1], skip_w_avg_update=True)[:, cross_over_point:, :]
-            return torch.cat((w1, w2), dim=1)
-        else:
-            w = self.G.mapping(z[0])
-            return w
-
     def latent(self, limit_batch_size=False):
         batch_size = self.config.batch_size if not limit_batch_size else self.config.batch_size // self.path_length_penalty.pl_batch_shrink
-        z1 = torch.randn(batch_size, self.config.latent_dim).to(self.device)
-        z2 = torch.randn(batch_size, self.config.latent_dim).to(self.device)
-        return z1, z2
+        z = torch.randn(batch_size, self.config.latent_dim).to(self.device)
+        return z
 
     def set_shape_codes(self, batch):
-        code = self.E(batch['x'])
-        batch['shape'] = code
+        code = self.E(batch['sdf_x'])
+        batch['shape'] = code[4].mean((2, 3, 4))
 
     def train_dataloader(self):
-        return DataLoader(self.train_set, self.config.batch_size, shuffle=True, pin_memory=True, drop_last=True, num_workers=self.config.num_workers)
+        return GraphDataLoader(self.train_set, self.config.batch_size, shuffle=True, pin_memory=True, drop_last=True, num_workers=self.config.num_workers)
 
     def val_dataloader(self):
-        return DataLoader(self.val_set, self.config.batch_size, shuffle=True, drop_last=True, num_workers=self.config.num_workers)
+        return GraphDataLoader(self.val_set, self.config.batch_size, shuffle=True, drop_last=True, num_workers=self.config.num_workers)
 
     def export_grid(self, prefix, output_dir_vis, output_dir_fid):
         vis_generated_images = []
-        grid_loader = iter(DataLoader(self.train_set, batch_size=self.config.batch_size, num_workers=0, drop_last=True))
+        grid_loader = iter(GraphDataLoader(self.train_set, batch_size=self.config.batch_size, num_workers=0, drop_last=True))
         for iter_idx, z in enumerate(self.grid_z.split(self.config.batch_size)):
             z = z.to(self.device)
             eval_batch = to_device(next(grid_loader), self.device)
             self.set_shape_codes(eval_batch)
-            fake_grid = self.G(z, eval_batch['shape'], noise_mode='const')
+            fake_grid = self.G(eval_batch['faces'], z, eval_batch['shape'])
             fake = self.render(fake_grid, eval_batch, use_bg_color=False).cpu()
             if output_dir_fid is not None:
                 for batch_idx in range(fake.shape[0]):
@@ -260,13 +220,13 @@ class StyleGAN2Trainer(pl.LightningModule):
         if self.ema is None:
             self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
         if self.R is None:
-            self.R = Raycast2DHandler(self.device, self.config.batch_size, (64, 64, 64), (self.config.image_size, self.config.image_size), 0.03125, 0.03125 * 5)
+            self.R = DifferentiableRenderer(self.config.image_size, "bounds", self.config.colorspace)
 
     def on_validation_start(self):
         if self.ema is None:
             self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
         if self.R is None:
-            self.R = Raycast2DHandler(self.device, self.config.batch_size, (64, 64, 64), (self.config.image_size, self.config.image_size), 0.03125, 0.03125 * 5)
+            self.R = DifferentiableRenderer(self.config.image_size, "bounds", self.config.colorspace)
 
 
 def step(opt, module):
@@ -279,7 +239,7 @@ def step(opt, module):
 @hydra.main(config_path='../config', config_name='stylegan2')
 def main(config):
     trainer = create_trainer("StyleGAN23D", config)
-    model = StyleGAN2Trainer(config)
+    model = PiGANTrainer(config)
     trainer.fit(model)
 
 

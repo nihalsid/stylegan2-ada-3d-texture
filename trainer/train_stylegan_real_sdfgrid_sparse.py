@@ -13,13 +13,13 @@ from cleanfid import fid
 import random
 
 from dataset import to_device
-from dataset.mesh_real_sdfgrid import SDFGridDataset
+from dataset.mesh_real_sdfgrid_sparse import SparseSDFGridDataset, Collater
 from model.augment import AugmentPipe
 from model.styleganvox import SDFEncoder
-from model.styleganvox.generator import Generator
+from model.styleganvox_sparse.generator import Generator
 from model.discriminator import Discriminator
 from model.loss import PathLengthPenalty, compute_gradient_penalty
-from model.raycast_rgbd.raycast_rgbd import Raycast2DHandler
+from model.raycast_rgbd.raycast_rgbd import Raycast2DSparseHandler
 from trainer import create_trainer
 from util.timer import Timer
 
@@ -37,8 +37,8 @@ class StyleGAN2Trainer(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters(config)
         self.config = config
-        self.train_set = SDFGridDataset(config)
-        self.val_set = SDFGridDataset(config, config.num_eval_images)
+        self.train_set = SparseSDFGridDataset(config)
+        self.val_set = SparseSDFGridDataset(config, config.num_eval_images)
         self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, 64, 3)
         self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
         self.E = SDFEncoder(1)
@@ -64,7 +64,7 @@ class StyleGAN2Trainer(pl.LightningModule):
     def forward(self, batch, limit_batch_size=False):
         z = self.latent(limit_batch_size)
         w = self.get_mapped_latent(z, 0.9)
-        fake = self.G.synthesis(w, batch['shape'])
+        fake = self.G.synthesis(w, batch['sparse_data_064'][0].long(), batch['sparse_data'][0].long(), batch['shape'])
         return fake, w
 
     def g_step(self, batch):
@@ -127,7 +127,8 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.log("rGP", gp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
 
     def render(self, color_grid, batch, use_bg_color=True):
-        r_color, _, _ = self.R.raycast_sdf(batch['x'], color_grid.contiguous(), batch['view'], batch['intrinsic'])
+        r_color, _, _ = self.R.raycast_sdf(batch['x_dense'], batch['sparse_data'][0], batch['sparse_data'][1],
+                                           color_grid.contiguous(), batch['view'], batch['intrinsic'])
         if not use_bg_color:
             r_color[r_color == -float('inf')] = 1
         else:
@@ -137,7 +138,7 @@ class StyleGAN2Trainer(pl.LightningModule):
 
     def get_real(self, batch, use_bg_color=True):
         if random.random() <= self.p_synthetic:
-            return self.render(batch['y'], batch, use_bg_color)
+            return self.render(batch['sparse_data'][2], batch, use_bg_color)
         else:
             if use_bg_color:
                 return batch['real'] * batch['mask'].expand(-1, 3, -1, -1) + (1 - batch['mask']).expand(-1, 3, -1, -1) * batch['bg'][:, None, None, None]
@@ -188,7 +189,8 @@ class StyleGAN2Trainer(pl.LightningModule):
                 self.set_shape_codes(batch)
                 shape = batch['shape']
                 real_render = self.get_real(batch, use_bg_color=False).cpu()
-                fake_render = self.render(self.G(latents[iter_idx % len(latents)].to(self.device), shape, noise_mode='const'), batch, use_bg_color=False).cpu()
+                fake_render = self.render(self.G(latents[iter_idx % len(latents)].to(self.device), batch['sparse_data_064'][0].long(),
+                                                 batch['sparse_data'][0].long(), shape, noise_mode='const'), batch, use_bg_color=False).cpu()
                 save_image(real_render, odir_samples / f"real_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 save_image(fake_render, odir_samples / f"fake_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 for batch_idx in range(real_render.shape[0]):
@@ -219,23 +221,23 @@ class StyleGAN2Trainer(pl.LightningModule):
         return z1, z2
 
     def set_shape_codes(self, batch):
-        code = self.E(batch['x'])
+        code = self.E(batch['x_dense_064'])
         batch['shape'] = code
 
     def train_dataloader(self):
-        return DataLoader(self.train_set, self.config.batch_size, shuffle=True, pin_memory=True, drop_last=True, num_workers=self.config.num_workers)
+        return DataLoader(self.train_set, self.config.batch_size, shuffle=True, pin_memory=True, drop_last=True, num_workers=self.config.num_workers, collate_fn=Collater([], []))
 
     def val_dataloader(self):
-        return DataLoader(self.val_set, self.config.batch_size, shuffle=True, drop_last=True, num_workers=self.config.num_workers)
+        return DataLoader(self.val_set, self.config.batch_size, shuffle=True, drop_last=True, num_workers=self.config.num_workers, collate_fn=Collater([], []))
 
     def export_grid(self, prefix, output_dir_vis, output_dir_fid):
         vis_generated_images = []
-        grid_loader = iter(DataLoader(self.train_set, batch_size=self.config.batch_size, num_workers=0, drop_last=True))
+        grid_loader = iter(DataLoader(self.train_set, batch_size=self.config.batch_size, num_workers=0, drop_last=True, collate_fn=Collater([], [])))
         for iter_idx, z in enumerate(self.grid_z.split(self.config.batch_size)):
             z = z.to(self.device)
             eval_batch = to_device(next(grid_loader), self.device)
             self.set_shape_codes(eval_batch)
-            fake_grid = self.G(z, eval_batch['shape'], noise_mode='const')
+            fake_grid = self.G(z, eval_batch['sparse_data_064'][0].long(), eval_batch['sparse_data'][0].long(), eval_batch['shape'], noise_mode='const')
             fake = self.render(fake_grid, eval_batch, use_bg_color=False).cpu()
             if output_dir_fid is not None:
                 for batch_idx in range(fake.shape[0]):
@@ -260,13 +262,13 @@ class StyleGAN2Trainer(pl.LightningModule):
         if self.ema is None:
             self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
         if self.R is None:
-            self.R = Raycast2DHandler(self.device, self.config.batch_size, (64, 64, 64), (self.config.image_size, self.config.image_size), 0.03125, 0.03125 * 5)
+            self.R = Raycast2DSparseHandler(self.device, self.config.batch_size, (128, 128, 128), (self.config.image_size, self.config.image_size), 0.015625, 0.015625 * 5)
 
     def on_validation_start(self):
         if self.ema is None:
             self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
         if self.R is None:
-            self.R = Raycast2DHandler(self.device, self.config.batch_size, (64, 64, 64), (self.config.image_size, self.config.image_size), 0.03125, 0.03125 * 5)
+            self.R = Raycast2DSparseHandler(self.device, self.config.batch_size, (128, 128, 128), (self.config.image_size, self.config.image_size), 0.015625, 0.015625 * 5)
 
 
 def step(opt, module):

@@ -44,6 +44,10 @@ def to_device(batch, device):
                 for m in range(len(batch['graph_data'][k])):
                     if isinstance(batch['graph_data'][k][m], torch.Tensor):
                         batch['graph_data'][k][m] = batch['graph_data'][k][m].to(device)
+    if 'sparse_data' in batch:
+        batch['sparse_data'] = [batch['sparse_data'][0].cuda(), batch['sparse_data'][1].cuda(), batch['sparse_data'][2].cuda()]
+    if 'sparse_data_064' in batch:
+        batch['sparse_data_064'] = [batch['sparse_data_064'][0].cuda(), batch['sparse_data_064'][1].cuda()]
     return batch
 
 
@@ -207,11 +211,12 @@ class Collater(object):
         elif isinstance(elem, Mapping):
             retdict = {}
             for key in elem:
+                if 'cam_position' in elem:
+                    retdict['view_vector'] = self.cat_collate([(d['vertices'].unsqueeze(0).expand(d['cam_position'].shape[0], -1, -1) - d['cam_position'].unsqueeze(1).expand(-1, d['vertices'].shape[0], -1)).reshape(-1, 3) for d in batch])
                 if key in ['x', 'y', 'bg', 'x_0', 'x_1']:
                     retdict[key] = self.cat_collate([d[key] for d in batch])
                 elif key == 'vertices':
                     retdict[key] = self.cat_collate([transform_pos_mvp(d['vertices'], d['mvp']) for d in batch])
-                    retdict['view_vector'] = self.cat_collate([(d['vertices'].unsqueeze(0).expand(d['cam_position'].shape[0], -1, -1) - d['cam_position'].unsqueeze(1).expand(-1, d['vertices'].shape[0], -1)).reshape(-1, 3) for d in batch])
                 elif key == 'normals':
                     retdict[key] = self.cat_collate([d['normals'].unsqueeze(0).expand(d['cam_position'].shape[0], -1, -1).reshape(-1, 3) for d in batch])
                 elif key == 'uv':
