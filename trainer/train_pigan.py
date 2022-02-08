@@ -191,7 +191,7 @@ def train(rank, opt):
                     subset_z = z[split * split_batch_size:(split + 1) * split_batch_size]
                     faces = batch['faces'][split * split_batch_size:(split + 1) * split_batch_size, :]
                     shape = encoder(batch['sdf_x'][split * split_batch_size:(split + 1) * split_batch_size])[4].mean((2, 3, 4))
-                    g_imgs = render(generator(faces, subset_z, shape), batch, metadata['img_size'])
+                    g_imgs = render(generator(noise(faces), subset_z, shape), batch, metadata['img_size'])
                     gen_imgs.append(g_imgs)
                 gen_imgs = torch.cat(gen_imgs, axis=0)
 
@@ -232,7 +232,7 @@ def train(rank, opt):
                 subset_z = z[split * split_batch_size:(split + 1) * split_batch_size]
                 faces = batch['faces'][split * split_batch_size:(split + 1) * split_batch_size, :]
                 shape = encoder(batch['sdf_x'][split * split_batch_size:(split + 1) * split_batch_size])[4].mean((2, 3, 4))
-                gen_imgs = render(generator(faces, subset_z, shape), batch, metadata['img_size'])
+                gen_imgs = render(generator(noise(faces), subset_z, shape), batch, metadata['img_size'])
                 g_preds, g_pred_latent, _ = discriminator(gen_imgs, alpha)
 
                 topk_percentage = max(0.99 ** (discriminator.step / metadata['topk_interval']), metadata['topk_v']) if 'topk_interval' in metadata and 'topk_v' in metadata else 1
@@ -349,6 +349,10 @@ def train(rank, opt):
 def render(face_colors, batch, img_resolution):
     rendered_color = render_helper.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(face_colors.reshape(-1, 3), batch), batch["ranges"].cpu(), resolution=img_resolution)
     return rendered_color.permute((0, 3, 1, 2))
+
+
+def noise(face_positions):
+    return face_positions + (torch.randn_like(face_positions) - 0.5) * 0.01
 
 
 if __name__ == '__main__':

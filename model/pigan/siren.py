@@ -165,13 +165,13 @@ class UniformBoxWarp(nn.Module):
 class SPATIALSIRENBASELINE(nn.Module):
     """Same architecture as TALLSIREN but adds a UniformBoxWarp to map input points to -1, 1"""
 
-    def __init__(self, input_dim=2, z_dim=100, hidden_dim=256, output_dim=1, device=None):
+    def __init__(self, input_dim=2, z_dim=100, hidden_dim=256, shape_dim=256, device=None):
         super().__init__()
         self.device = device
         self.input_dim = input_dim
         self.z_dim = z_dim
         self.hidden_dim = hidden_dim
-        self.output_dim = output_dim
+        self.shape_dim = shape_dim
 
         self.network = nn.ModuleList([
             FiLMLayer(3, hidden_dim),
@@ -183,12 +183,11 @@ class SPATIALSIRENBASELINE(nn.Module):
             FiLMLayer(hidden_dim, hidden_dim),
             FiLMLayer(hidden_dim, hidden_dim),
         ])
-        self.final_layer = nn.Linear(hidden_dim, 1)
 
-        self.color_layer_sine = FiLMLayer(hidden_dim + 3, hidden_dim)
+        self.color_layer_sine = FiLMLayer(hidden_dim, hidden_dim)
         self.color_layer_linear = nn.Sequential(nn.Linear(hidden_dim, 3))
 
-        self.mapping_network = CustomMappingNetwork(z_dim, 256, (len(self.network) + 1) * hidden_dim * 2)
+        self.mapping_network = CustomMappingNetwork(z_dim, shape_dim, 256, (len(self.network) + 1) * hidden_dim * 2)
 
         self.network.apply(frequency_init(25))
         self.final_layer.apply(frequency_init(25))
@@ -198,11 +197,11 @@ class SPATIALSIRENBASELINE(nn.Module):
 
         self.gridwarper = UniformBoxWarp(0.24)  # Don't worry about this, it was added to ensure compatibility with another model. Shouldn't affect performance.
 
-    def forward(self, input, z, ray_directions, **kwargs):
-        frequencies, phase_shifts = self.mapping_network(z)
-        return self.forward_with_frequencies_phase_shifts(input, frequencies, phase_shifts, ray_directions, **kwargs)
+    def forward(self, input, z, shape):
+        frequencies, phase_shifts = self.mapping_network(z, shape)
+        return self.forward_with_frequencies_phase_shifts(input, frequencies, phase_shifts)
 
-    def forward_with_frequencies_phase_shifts(self, input, frequencies, phase_shifts, ray_directions, **kwargs):
+    def forward_with_frequencies_phase_shifts(self, input, frequencies, phase_shifts):
         frequencies = frequencies * 15 + 30
 
         input = self.gridwarper(input)
@@ -213,11 +212,10 @@ class SPATIALSIRENBASELINE(nn.Module):
             end = (index + 1) * self.hidden_dim
             x = layer(x, frequencies[..., start:end], phase_shifts[..., start:end])
 
-        sigma = self.final_layer(x)
-        rbg = self.color_layer_sine(torch.cat([ray_directions, x], dim=-1), frequencies[..., -self.hidden_dim:], phase_shifts[..., -self.hidden_dim:])
+        rbg = self.color_layer_sine(x, frequencies[..., -self.hidden_dim:], phase_shifts[..., -self.hidden_dim:])
         rbg = torch.sigmoid(self.color_layer_linear(rbg))
 
-        return torch.cat([rbg, sigma], dim=-1)
+        return rbg
 
 
 class UniformBoxWarp(nn.Module):
