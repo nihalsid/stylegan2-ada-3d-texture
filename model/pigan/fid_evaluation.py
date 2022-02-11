@@ -27,7 +27,7 @@ def output_real_images(dataloader, num_imgs, real_dir):
     for i in range(num_imgs//batch_size):
         real_imgs = next(dataloader)['real']
         for img in real_imgs:
-            save_image(img, os.path.join(real_dir, f'{img_counter:0>5}.jpg'), normalize=True)
+            save_image(img, os.path.join(real_dir, f'{img_counter:0>5}.jpg'), normalize=True, range=(-1, 1))
             img_counter += 1
 
 
@@ -70,7 +70,7 @@ def output_images(render, generator, encoder, dataloader, rank, output_dir, devi
             generated_imgs = render(generator(faces, z, shape), batch, 128).cpu()
 
             for img in generated_imgs:
-                save_image(img, os.path.join(output_dir, f'{img_counter:0>5}.jpg'), normalize=True)
+                save_image(img, os.path.join(output_dir, f'{img_counter:0>5}.jpg'), normalize=True, range=(-1, 1))
                 if rank == 0: pbar.update(1)
     if rank == 0: pbar.close()
 

@@ -64,7 +64,7 @@ class CustomMappingNetwork(nn.Module):
 
                                      nn.Linear(map_hidden_dim, map_hidden_dim),
                                      nn.LeakyReLU(0.2, inplace=True),
-
+                                        
                                      nn.Linear(map_hidden_dim, map_output_dim))
 
         self.network.apply(kaiming_leaky_init)
@@ -150,7 +150,7 @@ class TALLSIREN(nn.Module):
         rbg = self.color_layer_sine(x, frequencies[..., -self.hidden_dim:], phase_shifts[..., -self.hidden_dim:])
         rbg = self.color_layer_linear(rbg)
 
-        return rbg
+        return rbg * 2 - 1
 
 
 class UniformBoxWarp(nn.Module):
@@ -190,7 +190,6 @@ class SPATIALSIRENBASELINE(nn.Module):
         self.mapping_network = CustomMappingNetwork(z_dim, shape_dim, 256, (len(self.network) + 1) * hidden_dim * 2)
 
         self.network.apply(frequency_init(25))
-        self.final_layer.apply(frequency_init(25))
         self.color_layer_sine.apply(frequency_init(25))
         self.color_layer_linear.apply(frequency_init(25))
         self.network[0].apply(first_layer_film_sine_init)
@@ -215,7 +214,7 @@ class SPATIALSIRENBASELINE(nn.Module):
         rbg = self.color_layer_sine(x, frequencies[..., -self.hidden_dim:], phase_shifts[..., -self.hidden_dim:])
         rbg = torch.sigmoid(self.color_layer_linear(rbg))
 
-        return rbg
+        return rbg * 2 - 1
 
 
 class UniformBoxWarp(nn.Module):

@@ -3,6 +3,8 @@
 import argparse
 import itertools
 import os
+from random import random
+
 import numpy as np
 import math
 
@@ -176,7 +178,8 @@ def train(rank, opt):
 
             alpha = min(1, (discriminator.step - step_last_upsample) / (metadata['fade_steps']))
 
-            real_imgs = batch['real']
+            uniform_colors = torch.rand(batch['real'].shape[0], batch['real'].shape[1], 1, 1).repeat(1, 1, batch['real'].shape[2], batch['real'].shape[3]).to(batch['real'].device) * 2 - 1
+            real_imgs = batch['real'] * (1 - batch['mask']) + uniform_colors * batch['mask']
 
             metadata['nerf_noise'] = max(0, 1. - discriminator.step / 5000.)
 
@@ -353,7 +356,7 @@ def render(face_colors, batch, img_resolution):
 
 
 def noise(face_positions):
-    return face_positions + torch.randn_like(face_positions) * 0.0075
+    return face_positions + (torch.randn_like(face_positions) - 0.5) * 0.01
 
 
 if __name__ == '__main__':

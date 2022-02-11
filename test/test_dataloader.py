@@ -185,7 +185,7 @@ def test_uv_dataloader(config):
 
 @hydra.main(config_path='../config', config_name='stylegan2_car')
 def test_compcars_together(config):
-    from dataset.meshcar_real_features import FaceGraphMeshDataset
+    from dataset.meshcar_real_features_ff2 import FaceGraphMeshDataset
     dataset = FaceGraphMeshDataset(config)
     dataloader = GraphDataLoader(dataset, batch_size=1, num_workers=0)
     render_helper = DifferentiableRenderer(config.image_size, 'bounds', config.colorspace).cuda()

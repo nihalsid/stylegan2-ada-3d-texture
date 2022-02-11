@@ -30,7 +30,7 @@ val_check_percent: 1.0
 val_check_interval: 1
 resume: null
 
-num_mapping_layers: 2
+num_mapping_layers: 5
 lr_g: 0.002
 lr_d: 0.00235
 lr_e: 0.0001
@@ -48,6 +48,7 @@ ada_interval: 4
 ada_fixed: False
 g_channel_base: 16384
 d_channel_base: 16384
+d_channel_max: 512
 features: normal
 p_synthetic: 1.0
 #normal

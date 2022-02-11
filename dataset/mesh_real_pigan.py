@@ -18,7 +18,10 @@ class SDFGridDataset(torch.utils.data.Dataset):
     def __init__(self, config, limit_dataset_size=None):
         self.dataset_directory = Path(config.dataset_path)
         self.mesh_directory = Path(config.dataset_path)
-        self.image_size = config.img_size
+        try:
+            self.image_size = config.img_size
+        except Exception as err:
+            self.image_size = config.image_size
         self.bg_color = config.random_bg
         self.real_images = {x.name.split('.')[0]: x for x in Path(config.image_path).iterdir() if x.name.endswith('.jpg') or x.name.endswith('.png')}
         self.masks = {x: Path(config.mask_path) / self.real_images[x].name for x in self.real_images}
@@ -40,12 +43,12 @@ class SDFGridDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         selected_item = self.items[idx]
         mesh = trimesh.load(self.dataset_directory / selected_item / "model_normalized.obj", process=False)
-        faces = torch.from_numpy(mesh.triangles.mean(1)).float() * 2
+        faces = torch.from_numpy(mesh.triangles.mean(1)).float()
         vertices = torch.from_numpy(mesh.vertices).float()
         vctr = torch.tensor(list(range(vertices.shape[0]))).long()
         indices = torch.from_numpy(mesh.faces).int()
         sdf_grid = torch.from_numpy(np.load(self.dataset_directory / selected_item / "064.npy")).unsqueeze(0) - 0.0075
-        color_grid = torch.from_numpy(np.load(self.dataset_directory / selected_item / "064_if.npy")).permute((3, 0, 1, 2)) / 255.0
+        color_grid = torch.from_numpy(np.load(self.dataset_directory / selected_item / "064_if.npy")).permute((3, 0, 1, 2)) / 127.5 - 1
         tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
         real_sample, masks, mvp = self.get_image_and_view(selected_item)
         background = self.color_generator(self.views_per_sample)
@@ -126,7 +129,7 @@ class SDFGridDataset(torch.utils.data.Dataset):
     def process_real_image(self, path):
         resize = T.Resize(size=(self.image_size, self.image_size))
         pad = T.Pad(padding=(self.real_pad, self.real_pad), fill=1)
-        t_image = resize(pad(read_image(str(path)).float() / 255.0))
+        t_image = resize(pad(read_image(str(path)).float() / 127.5 - 1))
         return t_image.unsqueeze(0)
 
     def load_pair_meta(self, pairmeta_path):
@@ -152,7 +155,7 @@ class SDFGridDataset(torch.utils.data.Dataset):
 def random_color(num_views):
     randoms = []
     for i in range(num_views):
-        r, g, b = random.randint(0, 255) / 255.0, random.randint(0, 255) / 255.0, random.randint(0, 255) / 255.0
+        r, g, b = random.randint(0, 255) / 127.5 - 1, random.randint(0, 255) / 127.5 - 1, random.randint(0, 255) / 127.5 - 1
         randoms.append(torch.from_numpy(np.array([r, g, b]).reshape((1, 3, 1, 1))).float())
     return torch.cat(randoms, dim=0)
 
@@ -160,7 +163,7 @@ def random_color(num_views):
 def random_grayscale(num_views):
     randoms = []
     for i in range(num_views):
-        c = random.randint(0, 255) / 255.0
+        c = random.randint(0, 255) / 127.5 - 1
         randoms.append(torch.from_numpy(np.array([c, c, c]).reshape((1, 3, 1, 1))).float())
     return torch.cat(randoms, dim=0)
 
