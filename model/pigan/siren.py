@@ -64,7 +64,7 @@ class CustomMappingNetwork(nn.Module):
 
                                      nn.Linear(map_hidden_dim, map_hidden_dim),
                                      nn.LeakyReLU(0.2, inplace=True),
-                                        
+
                                      nn.Linear(map_hidden_dim, map_output_dim))
 
         self.network.apply(kaiming_leaky_init)

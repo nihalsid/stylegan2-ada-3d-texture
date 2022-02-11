@@ -248,6 +248,67 @@ class GraphEncoder(torch.nn.Module):
         return level_feats
 
 
+class TwinGraphEncoder(torch.nn.Module):
+
+    def __init__(self, in_channels_0, in_channels_1, layer_dims=(32, 64, 64, 128, 128, 128, 256, 256), conv_layer=FaceConv, norm=torch_geometric.nn.BatchNorm):
+
+        super().__init__()
+        self.activation = torch.nn.LeakyReLU()
+        self.enc0_conv_in = torch.nn.Linear(in_channels_0, layer_dims[0])
+        self.enc1_conv_in = torch.nn.Linear(in_channels_1, layer_dims[0])
+        self.down0_0_block_0 = FResNetBlock(layer_dims[0], layer_dims[1], conv_layer, norm, self.activation)
+        self.down1_0_block_0 = FResNetBlock(layer_dims[0], layer_dims[1], conv_layer, norm, self.activation)
+        self.down_0_block_1 = FResNetBlock(layer_dims[1] * 2, layer_dims[2], conv_layer, norm, self.activation)  #
+        self.down_1_block_0 = FResNetBlock(layer_dims[2], layer_dims[3], conv_layer, norm, self.activation)  #
+        self.down_2_block_0 = FResNetBlock(layer_dims[3], layer_dims[4], conv_layer, norm, self.activation)  #
+        self.down_3_block_0 = FResNetBlock(layer_dims[4], layer_dims[5], conv_layer, norm, self.activation)  #
+        self.down_4_block_0 = FResNetBlock(layer_dims[5], layer_dims[6], conv_layer, norm, self.activation)  #
+        self.enc_mid_block_0 = FResNetBlock(layer_dims[6], layer_dims[7], conv_layer, norm, self.activation)
+        self.enc_out_conv = conv_layer(layer_dims[7], layer_dims[7])  #
+        self.enc_out_norm = norm(layer_dims[7])
+
+    def forward(self, x_0, x_1, graph_data):
+        level_feats = []
+        pool_ctr = 0
+        x_0 = self.enc0_conv_in(x_0)
+        x_1 = self.enc1_conv_in(x_1)
+        x_0 = self.down0_0_block_0(x_0, graph_data['face_neighborhood'], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        x_1 = self.down1_0_block_0(x_1, graph_data['face_neighborhood'], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        x = self.down_0_block_1(torch.cat([x_0, x_1], dim=1), graph_data['face_neighborhood'], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        level_feats.append(x)
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], graph_data['lateral_maps'][pool_ctr], pool_op='max')
+        pool_ctr += 1
+
+        x = self.down_1_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        level_feats.append(x)
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], graph_data['lateral_maps'][pool_ctr], pool_op='max')
+        pool_ctr += 1
+
+        x = self.down_2_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        level_feats.append(x)
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], graph_data['lateral_maps'][pool_ctr], pool_op='max')
+        pool_ctr += 1
+
+        x = self.down_3_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        level_feats.append(x)
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], graph_data['lateral_maps'][pool_ctr], pool_op='max')
+        pool_ctr += 1
+
+        x = self.down_4_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        level_feats.append(x)
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], graph_data['lateral_maps'][pool_ctr], pool_op='max')
+        pool_ctr += 1
+
+        x = self.enc_mid_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        x = self.enc_out_norm(x)
+        x = self.activation(x)
+        x = self.enc_out_conv(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+
+        level_feats.append(x)
+
+        return level_feats
+
+
 class FResNetBlock(torch.nn.Module):
 
     def __init__(self, nf_in, nf_out, conv_layer, norm, activation):

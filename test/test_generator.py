@@ -286,5 +286,34 @@ def test_sparse_generator(config):
         break
 
 
+@hydra.main(config_path='../config', config_name='stylegan2')
+def test_generator_u_deep(config):
+    from model.graph_generator_u_deep import Generator
+    batch_size = 4
+    dataset = FaceGraphMeshDataset(config)
+    dataloader = GraphDataLoader(dataset, batch_size=batch_size, num_workers=0)
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).cuda()
+    E = GraphEncoder(dataset.num_feats).cuda()
+    print_model_parameter_count(G)
+    print_model_parameter_count(E)
+    for batch_idx, batch in enumerate(tqdm(dataloader)):
+        # sanity test forward pass
+        batch = to_device(batch, torch.device("cuda:0"))
+        shape = E(batch['x'], batch['graph_data'])
+        z = torch.randn(batch_size, 512).to(torch.device("cuda:0"))
+        w = G.mapping(z)
+        t0 = time.time()
+        fake = G.synthesis(batch['graph_data'], w, shape)
+        print('Time for fake:', time.time() - t0, ', shape:', fake.shape)
+        # sanity test backwards
+        loss = torch.abs(fake - torch.rand_like(fake)).mean()
+        t0 = time.time()
+        loss.backward()
+        print('Time for backwards:', time.time() - t0)
+        print('backwards done')
+        print_module_summary(G.synthesis, [batch['graph_data'], w, shape])
+        break
+
+
 if __name__ == '__main__':
-    test_sparse_generator()
+    test_generator_u_deep()

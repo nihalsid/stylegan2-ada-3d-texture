@@ -33,6 +33,43 @@ class Discriminator(torch.nn.Module):
         return x
 
 
+class DiscriminatorProgressive(torch.nn.Module):
+
+    def __init__(self, img_resolution, img_channels, w_num_layers=0, c_dim=0, mbstd_on=1, channel_base=16384, channel_max=512):
+        super().__init__()
+        self.img_resolution = img_resolution
+        self.img_resolution_log2 = int(np.log2(img_resolution))
+        self.img_channels = img_channels
+        self.c_dim = c_dim
+        self.block_resolutions = [2 ** i for i in range(self.img_resolution_log2, 2, -1)]
+        channels_dict = {res: min(channel_base // res, channel_max) for res in self.block_resolutions + [4]}
+        self.module_list = []
+        self.shape_to_str = lambda x: f'{x:03d}'
+        self.fromRGB = torch.nn.ModuleDict({
+            self.shape_to_str(res): EqualizedConv2d(img_channels, channels_dict[res], kernel_size=1, activation='lrelu')
+            for res in self.block_resolutions[:-2]})
+        for res in self.block_resolutions:
+            in_channels = channels_dict[res]
+            out_channels = channels_dict[res // 2]
+            self.module_list.append(DiscriminatorBlock(in_channels, out_channels))
+        self.module_list.append(DiscriminatorEpilogue(channels_dict[4], resolution=4, cmap_dim=(0 if c_dim == 0 else channels_dict[4]), mbstd_num_channels=mbstd_on))
+        self.module_list = torch.nn.ModuleList(self.module_list)
+        if c_dim > 0:
+            self.mapping = DiscriminatorMappingNetwork(c_dim=c_dim, cmap_dim=channels_dict[4], num_layers=w_num_layers)
+
+    def forward(self, x_in, alpha, c=None):
+        if self.c_dim > 0:
+            c = self.mapping(c)
+        module_start = self.block_resolutions.index(x_in.shape[-1])
+        x = self.fromRGB[self.shape_to_str(x_in.shape[-1])](x_in)
+        for i, net in enumerate(self.module_list[module_start:-1]):
+            if i == 1:
+                x = x * alpha + self.fromRGB[self.shape_to_str(x_in.shape[-1] // 2)](torch.nn.functional.interpolate(x_in, scale_factor=0.5, mode='nearest', recompute_scale_factor=False))
+            x = net(x)
+        x = self.module_list[-1](x, c)
+        return x
+
+
 class DiscriminatorBlock(torch.nn.Module):
 
     def __init__(self, in_channels, out_channels, activation='lrelu'):
@@ -130,7 +167,7 @@ class DiscriminatorMappingNetwork(torch.nn.Module):
 
 if __name__ == '__main__':
     from util.misc import print_model_parameter_count, print_module_summary
-    img_res = 128
-    model = Discriminator(img_resolution=img_res, img_channels=3, channel_base=2 ** 13)
-    print_module_summary(model, (torch.randn((16, 3, img_res, img_res)), ))
+    img_res = 512
+    model = DiscriminatorProgressive(img_resolution=img_res, img_channels=3)
+    print_module_summary(model, (torch.randn((16, 3, img_res, img_res)), 1))
     print_model_parameter_count(model)
