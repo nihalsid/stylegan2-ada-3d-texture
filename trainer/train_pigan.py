@@ -3,16 +3,10 @@
 import argparse
 import itertools
 import os
-import numpy as np
 import math
 
-from collections import deque
-
 import torch
-import torch.multiprocessing as mp
-import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision.utils import save_image
 
 from dataset import GraphDataLoader, to_vertex_colors_scatter, to_device
