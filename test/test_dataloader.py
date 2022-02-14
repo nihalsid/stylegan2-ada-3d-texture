@@ -152,15 +152,16 @@ def test_sparsegrid_dataloader(config):
 def test_pigan_dataloader(config):
     from dataset.mesh_real_pigan import SDFGridDataset
     dataset = SDFGridDataset(config)
-    dataloader = GraphDataLoader(dataset, batch_size=4, num_workers=0)
     render_helper = DifferentiableRenderer(config.image_size, 'bounds').cuda()
-    Path("runs/images_fake").mkdir(exist_ok=True)
-    for batch_idx, batch in enumerate(tqdm(dataloader)):
-        batch = to_device(batch, torch.device("cuda:0"))
-        colors = batch["faces"]
-        rendered_color_gt = render_helper.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(colors.reshape(-1, 3), batch), batch["ranges"].cpu())
-        save_image(torch.cat([rendered_color_gt.permute((0, 3, 1, 2)), batch['real']], 0), f"runs/images_fake/test_view_{batch_idx:04d}.png", nrow=4, value_range=(-1, 1), normalize=True)
-        break
+    for ctr in range(10):
+        dataloader = GraphDataLoader(dataset, batch_size=4, shuffle=True, num_workers=0)
+        Path("runs/images_fake").mkdir(exist_ok=True)
+        for batch_idx, batch in enumerate(tqdm(dataloader)):
+            batch = to_device(batch, torch.device("cuda:0"))
+            colors = batch["faces"]
+            rendered_color_gt = render_helper.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(colors.reshape(-1, 3), batch), batch["ranges"].cpu())
+            save_image(torch.cat([rendered_color_gt.permute((0, 3, 1, 2)), batch['real']], 0), f"runs/images_fake/test_view_{batch_idx:04d}_{ctr:03d}.png", nrow=4, value_range=(-1, 1), normalize=True)
+            break
 
 
 @hydra.main(config_path='../config', config_name='stylegan2')
@@ -204,4 +205,5 @@ def test_compcars_together(config):
 if __name__ == '__main__':
     # test_view_angles_together()
     # test_uv_dataloader()
-    test_compcars_together()
+    # test_compcars_together()
+    test_pigan_dataloader()

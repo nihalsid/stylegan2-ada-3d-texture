@@ -76,7 +76,7 @@ class SDFGridDataset(torch.utils.data.Dataset):
         for c_i, c_v in zip(image_selections, view_selections):
             images.append(self.get_real_image(self.meta_to_pair(c_i)))
             masks.append(self.get_real_mask(self.meta_to_pair(c_i)))
-            perspective_cam = spherical_coord_to_cam(c_i['fov'], c_i['azimuth'], c_i['elevation'])
+            perspective_cam = spherical_coord_to_cam(c_v['fov'], c_v['azimuth'], c_v['elevation'])
             projection_matrix = torch.from_numpy(perspective_cam.projection_mat()).float()
             view_matrix = torch.from_numpy(perspective_cam.view_mat()).float()
             cameras.append(torch.matmul(projection_matrix, view_matrix))

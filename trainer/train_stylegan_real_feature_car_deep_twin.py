@@ -124,8 +124,11 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.log("rGP", gp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
 
     def render(self, face_colors, batch, use_bg_color=True):
-        rendered_color = self.R.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(face_colors, batch), batch["ranges"].cpu(), batch['bg'] if use_bg_color else None)
-        return rendered_color.permute((0, 3, 1, 2))
+        rendered_color = self.R.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(face_colors, batch), batch["ranges"].cpu(), batch['bg'] if use_bg_color else None, resolution=self.config.render_size)
+        ret_val = rendered_color.permute((0, 3, 1, 2))
+        if self.config.render_size != self.config.image_size:
+            ret_val = torch.nn.functional.interpolate(ret_val, (self.config.image_size, self.config.image_size), mode='bilinear', align_corners=True)
+        return ret_val
 
     def training_step(self, batch, batch_idx):
         self.set_shape_codes(batch)

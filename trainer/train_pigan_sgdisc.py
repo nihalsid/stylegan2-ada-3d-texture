@@ -16,7 +16,7 @@ from dataset.mesh_real_pigan import SDFGridDataset
 from model.augment import AugmentPipe
 from model.differentiable_renderer import DifferentiableRenderer
 from model.discriminator import Discriminator
-from model.pigan.siren import TALLSIREN
+from model.pigan.siren import TALLSIREN, SPATIALSIRENBASELINE
 from model.styleganvox import SDFEncoder
 from model.loss import PathLengthPenalty, compute_gradient_penalty
 from trainer import create_trainer
@@ -39,10 +39,10 @@ class PiGANTrainer(pl.LightningModule):
         self.config = config
         self.train_set = SDFGridDataset(config)
         self.val_set = SDFGridDataset(config, config.num_eval_images)
-        self.G = TALLSIREN(3, z_dim=config.latent_dim, hidden_dim=512, shape_dim=256)
+        self.G = SPATIALSIRENBASELINE(3, z_dim=config.latent_dim, hidden_dim=512, shape_dim=256)
         self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base, channel_max=config.d_channel_max)
         self.E = SDFEncoder(1)
-        print_module_summary(self.D, (torch.zeros(self.config.batch_size, 3, config.image_size, config.image_size), ))
+        # print_module_summary(self.D, (torch.zeros(self.config.batch_size, 3, config.image_size, config.image_size), ))
         self.R = None
         self.p_synthetic = config.p_synthetic
         self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size, config.views_per_sample, config.colorspace)
@@ -183,6 +183,8 @@ class PiGANTrainer(pl.LightningModule):
         return z
 
     def set_shape_codes(self, batch):
+        uniform_colors = torch.rand(batch['real'].shape[0], batch['real'].shape[1], 1, 1).repeat(1, 1, batch['real'].shape[2], batch['real'].shape[3]).to(batch['real'].device) * 2 - 1
+        batch['real'] = batch['real'] * (1 - batch['mask']) + uniform_colors * batch['mask']
         code = self.E(batch['sdf_x'])
         batch['shape'] = code[4].mean((2, 3, 4))
 
@@ -194,7 +196,7 @@ class PiGANTrainer(pl.LightningModule):
 
     def export_grid(self, prefix, output_dir_vis, output_dir_fid):
         vis_generated_images = []
-        grid_loader = iter(GraphDataLoader(self.train_set, batch_size=self.config.batch_size, num_workers=0, drop_last=True))
+        grid_loader = iter(GraphDataLoader(self.train_set, batch_size=self.config.batch_size, shuffle=True, num_workers=0, drop_last=True))
         for iter_idx, z in enumerate(self.grid_z.split(self.config.batch_size)):
             z = z.to(self.device)
             eval_batch = to_device(next(grid_loader), self.device)
@@ -237,7 +239,7 @@ def step(opt, module):
     for param in module.parameters():
         if param.grad is not None:
             torch.nan_to_num(param.grad, nan=0, posinf=1e5, neginf=-1e5, out=param.grad)
-    # torch.nn.utils.clip_grad_norm_(module.parameters(), 5)
+    torch.nn.utils.clip_grad_norm_(module.parameters(), 1)
     opt.step()
 
 

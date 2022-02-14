@@ -14,13 +14,12 @@ image_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/exemplars
 mask_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/exemplars_mask
 uv_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_map
 silhoutte_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_mask
-mesh_resolution: 64
 
 experiment: fast_dev
 seed: null
 save_epoch: 1
 sanity_steps: 1
-max_epoch: 2000
+max_epoch: 5000
 scheduler: null
 val_check_percent: 1.0
 val_check_interval: 1
@@ -51,9 +50,10 @@ random_bg: grayscale
 colorspace: rgb
 
 image_size: 128
+render_size:
 
-progressive_switch: [10e3, 40e3, 90e3]
-alpha_switch: [5e3, 10e3, 30e3]
+progressive_switch: [10e3, 70e3, 180e3]
+alpha_switch: [5e3, 10e3, 10e3]
 
 num_patch_per_view: 4
 patch_size: 64
