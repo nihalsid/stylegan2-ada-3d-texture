@@ -215,6 +215,8 @@ class StyleGAN2Trainer(pl.LightningModule):
         return GraphDataLoader(self.val_set, self.config.batch_size, shuffle=True, drop_last=True, num_workers=self.config.num_workers)
 
     def export_grid(self, prefix, output_dir_vis, output_dir_fid):
+        (Path("runs") / self.config.experiment / "checkpoints").mkdir(exist_ok=True)
+        torch.save(self.ema, Path("runs") / self.config.experiment / "checkpoints" / f"ema_{self.global_step:09d}.pth")
         vis_generated_images = []
         grid_loader = iter(GraphDataLoader(self.train_set, batch_size=self.config.batch_size))
         for iter_idx, z in enumerate(self.grid_z.split(self.config.batch_size)):

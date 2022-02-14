@@ -226,6 +226,8 @@ class StyleGAN2Trainer(pl.LightningModule):
 
     @rank_zero_only
     def validation_epoch_end(self, _val_step_outputs):
+        (Path("runs") / self.config.experiment / "checkpoints").mkdir(exist_ok=True)
+        torch.save(self.ema, Path("runs") / self.config.experiment / "checkpoints" / f"ema_{self.global_step:09d}.pth")
         with Timer("export_grid"):
             odir_real, odir_fake, odir_samples, odir_grid, odir_meshes = self.create_directories()
             self.export_grid("", odir_grid, None)
