@@ -5,6 +5,7 @@ from torch import nn
 from torch.autograd import Function
 
 import model.raycast_rgbd.raycast_rgbd_cuda as raycast_rgbd_cuda
+from torchvision.ops import masks_to_boxes
 
 
 class RayCastRGBDFunction(Function):
@@ -109,6 +110,7 @@ class Raycast2DSparseHandler:
 
     def __init__(self, device, batch_size, dims3d, render_shape, voxelsize, trunc, max_num_frames=1):
         self.truncation = trunc
+        self.render_shape = render_shape
         self.raycaster = RaycastRGBD(device, batch_size, dims3d, render_shape[1], render_shape[0],
                                      depth_min=0.1 / voxelsize, depth_max=6.0 / voxelsize,
                                      thresh_sample_dist=50.5*0.3*trunc, ray_increment=0.3*trunc,
@@ -118,7 +120,38 @@ class Raycast2DSparseHandler:
         locs = torch.cat([locs[:, 1:2], locs[:, 2:3], locs[:, 3:4], locs[:, 0:1]], 1).contiguous().long()
         sparse_normals = compute_normals_from_sdf(sdf_dense, locs, torch.inverse(view_matrix))
         r_color, r_depth, r_normal = self.raycaster(locs, sparse_sdf.contiguous(), sparse_color, sparse_normals, view_matrix, intrinsic_matrix)
-        return r_color.clone(), r_depth.clone(), r_normal.clone()
+        try:
+            mask = r_color == -float('inf')
+            color_crops = []
+            boxes = masks_to_boxes(torch.logical_not(mask[:, :, :, 0]))
+            for img_idx in range(r_color.shape[0]):
+                x1, y1, x2, y2 = [int(val) for val in boxes[img_idx, :].tolist()]
+                color_crop = r_color[img_idx, y1: y2, x1: x2, :].permute((2, 0, 1))
+                pad = [[0, 0], [0, 0]]
+                if y2 - y1 > x2 - x1:
+                    total_pad = (y2 - y1) - (x2 - x1)
+                    pad[0][0] = total_pad // 2
+                    pad[0][1] = total_pad - pad[0][0]
+                    pad[1][0], pad[1][1] = 0, 0
+                    additional_pad = int((y2 - y1) * 0.1)
+                else:
+                    total_pad = (x2 - x1) - (y2 - y1)
+                    pad[0][0], pad[0][1] = 0, 0
+                    pad[1][0] = total_pad // 2
+                    pad[1][1] = total_pad - pad[1][0]
+                    additional_pad = int((x2 - x1) * 0.1)
+                for i in range(4):
+                    pad[i // 2][i % 2] += additional_pad
+
+                padded = torch.ones((color_crop.shape[0], color_crop.shape[1] + pad[1][0] + pad[1][1], color_crop.shape[2] + pad[0][0] + pad[0][1]), device=color_crop.device) * -float('inf')
+                padded[:, pad[1][0]: padded.shape[1] - pad[1][1], pad[0][0]: padded.shape[2] - pad[0][1]] = color_crop
+                # color_crop = T.Pad((pad[0][0], pad[1][0], pad[0][1], pad[1][1]), 1)(color_crop)
+                color_crop = torch.nn.functional.interpolate(padded.unsqueeze(0), size=(self.render_shape[0], self.render_shape[1]), mode='bilinear', align_corners=False).permute((0, 2, 3, 1))
+                color_crops.append(color_crop)
+            ret_color = torch.cat(color_crops, dim=0).clone()
+        except Exception:
+            ret_color = r_color.clone()
+        return ret_color, r_depth.clone(), r_normal.clone()
 
 
 def compute_normals_from_sdf(sdf, locs, transform=None):

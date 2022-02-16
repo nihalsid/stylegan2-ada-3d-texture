@@ -35,6 +35,7 @@ class StyleGAN2Trainer(pl.LightningModule):
 
     def __init__(self, config):
         super().__init__()
+        config.views_per_sample = 1
         self.save_hyperparameters(config)
         self.config = config
         self.train_set = SparseSDFGridDataset(config)
@@ -197,6 +198,7 @@ class StyleGAN2Trainer(pl.LightningModule):
                 save_image(fake_render, odir_samples / f"fake_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 for batch_idx in range(real_render.shape[0]):
                     save_image(real_render[batch_idx], odir_real / f"{iter_idx}_{batch_idx}.jpg", value_range=(-1, 1), normalize=True)
+
         self.ema.restore([p for p in self.G.parameters() if p.requires_grad])
         fid_score = fid.compute_fid(str(odir_real), str(odir_fake), device=self.device, num_workers=0)
         print(f'FID: {fid_score:.3f}')

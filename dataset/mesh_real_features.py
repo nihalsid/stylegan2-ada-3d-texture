@@ -74,6 +74,9 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         num_sub_vertices = [pt_arxiv['conv_data'][i][0].shape[0] for i in range(1, len(pt_arxiv['conv_data']))]
         pad_sizes = [pt_arxiv['conv_data'][i][2].shape[0] for i in range(len(pt_arxiv['conv_data']))]
         sub_edges = [pt_arxiv['conv_data'][i][0].long() for i in range(1, len(pt_arxiv['conv_data']))]
+        ff2_maps = [x.float() / math.pi for x in pt_arxiv['ff2_data']]
+        ff2_maps = [((torch.norm(x, dim=1) / math.sqrt(8)) ** 4 * 2 - 1).unsqueeze(-1) for x in ff2_maps]
+
         pool_maps = pt_arxiv['pool_locations']
         lateral_maps = pt_arxiv['lateral_maps']
         is_pad = [pt_arxiv['conv_data'][i][4].bool() for i in range(len(pt_arxiv['conv_data']))]
@@ -91,7 +94,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         return {
             "name": selected_item,
             "x": self.input_feature_extractor(pt_arxiv),
-            "y": self.cspace_convert(pt_arxiv['target_colors'].float() * 2),
+            "y": self.cspace_convert(ff2_maps[0].reshape(-1, 1).repeat(1, 3).float()),
             "vertex_ctr": vctr,
             "vertices": vertices,
             "normals": normals,
@@ -103,15 +106,16 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "bg": torch.cat([background, torch.ones([background.shape[0], 1, 1, 1])], dim=1),
             "indices": tri_indices,
             "ranges": torch.tensor([0, tri_indices.shape[0]]).int(),
-            "graph_data": self.get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, lateral_maps, is_pad, level_masks)
+            "graph_data": self.get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, ff2_maps, lateral_maps, is_pad, level_masks)
         }
 
     @staticmethod
-    def get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, lateral_maps, is_pad, level_masks):
+    def get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, ff2_maps, lateral_maps, is_pad, level_masks):
         return EasyDict({
             'face_neighborhood': edge_index,
             'sub_neighborhoods': sub_edges,
             'pads': pad_sizes,
+            'ff2_maps': ff2_maps,
             'node_counts': num_sub_vertices,
             'pool_maps': pool_maps,
             'lateral_maps': lateral_maps,

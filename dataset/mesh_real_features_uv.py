@@ -38,7 +38,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             else:
                 self.items = self.items * limit_dataset_size
         self.target_name = "model_normalized.obj"
-        self.views_per_sample = 1
+        self.views_per_sample = config.views_per_sample
         self.color_generator = random_color if config.random_bg == 'color' else (random_grayscale if config.random_bg == 'grayscale' else white)
         self.pair_meta, self.all_views = self.load_pair_meta(config.pairmeta_path)
         self.real_images_preloaded, self.masks_preloaded = {}, {}
