@@ -11,19 +11,19 @@ class Generator(torch.nn.Module):
         self.w_dim = w_dim
         self.img_resolution = img_resolution
         self.img_channels = img_channels
-        self.synthesis = SynthesisNetwork(w_dim=w_dim, img_resolution=img_resolution, img_channels=img_channels)
+        self.synthesis = SynthesisNetwork(w_dim=w_dim, img_resolution=img_resolution, geo_channels=256, img_channels=img_channels)
         self.num_ws = self.synthesis.num_ws
         self.mapping = MappingNetwork(z_dim=z_dim, w_dim=w_dim, c_dim=c_dim, num_ws=self.num_ws, num_layers=w_num_layers)
 
-    def forward(self, positions, z, c, truncation_psi=1, truncation_cutoff=None, noise_mode='random'):
+    def forward(self, positions, z, c, shape_grid, truncation_psi=1, truncation_cutoff=None, noise_mode='random'):
         ws = self.mapping(z, c, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff)
-        img = self.synthesis(positions, ws, noise_mode)
+        img = self.synthesis(positions, ws, shape_grid, noise_mode)
         return img
 
 
 class SynthesisNetwork(torch.nn.Module):
 
-    def __init__(self, w_dim, img_resolution, img_channels, channel_base=16384, channel_max=512):
+    def __init__(self, w_dim, img_resolution, img_channels, geo_channels, channel_base=16384, channel_max=512):
         super().__init__()
 
         self.w_dim = w_dim
@@ -32,10 +32,16 @@ class SynthesisNetwork(torch.nn.Module):
         self.img_channels = img_channels
         self.block_resolutions = [2 ** i for i in range(2, self.img_resolution_log2 + 1)]
         self.num_ws = 2 * (len(self.block_resolutions) + 1)
+        self.geo_channels = geo_channels
         channels_dict = {res: min(channel_base // res, channel_max) for res in self.block_resolutions}
         self.decoder_mlp = torch.nn.Sequential(
-            FullyConnectedLayer(self.img_channels // 3, 64, activation='lrelu'),
+            FullyConnectedLayer(self.img_channels // 3 * 2, 128, activation='lrelu'),
+            FullyConnectedLayer(128, 64, activation='lrelu'),
             FullyConnectedLayer(64, 3)
+        )
+        self.geo_mlp = torch.nn.Sequential(
+            FullyConnectedLayer(geo_channels, 64, activation='lrelu'),
+            FullyConnectedLayer(64, self.img_channels // 3)
         )
         self.blocks = torch.nn.ModuleList()
         self.first_block = SynthesisPrologue(channels_dict[self.block_resolutions[0]], w_dim=w_dim,
@@ -46,7 +52,7 @@ class SynthesisNetwork(torch.nn.Module):
             block = SynthesisBlock(in_channels, out_channels, w_dim=w_dim, resolution=res, img_channels=img_channels)
             self.blocks.append(block)
 
-    def forward(self, positions, ws, noise_mode='random'):
+    def forward(self, positions, ws, shape_grid, noise_mode='random'):
         batch_size = ws.shape[0]
         split_ws = [ws[:, 0:2, :]] + [ws[:, 2 * n + 1: 2 * n + 4, :] for n in range(len(self.block_resolutions))]
         x, img = self.first_block(split_ws[0], noise_mode)
@@ -55,11 +61,14 @@ class SynthesisNetwork(torch.nn.Module):
         triplane = img.reshape(batch_size, 3, self.img_channels // 3, self.img_resolution, self.img_resolution)
         query_positions = torch.clamp(positions * 2, -1, 1)
         query_positions = query_positions.reshape(batch_size, -1, 1, 3)
+        query_positions_geo = query_positions.reshape(batch_size, -1, 1, 1, 3)
         feat_xy = torch.nn.functional.grid_sample(triplane[:, 0, :, :, :], query_positions[:, :, :, [0, 1]], mode='bilinear', padding_mode='border', align_corners=False)
         feat_xz = torch.nn.functional.grid_sample(triplane[:, 1, :, :, :], query_positions[:, :, :, [0, 2]], mode='bilinear', padding_mode='border', align_corners=False)
         feat_yz = torch.nn.functional.grid_sample(triplane[:, 2, :, :, :], query_positions[:, :, :, [1, 2]], mode='bilinear', padding_mode='border', align_corners=False)
+        feat_geo = torch.nn.functional.grid_sample(shape_grid, query_positions_geo, mode='bilinear', padding_mode='border', align_corners=False)
+        geo_feat = self.geo_mlp(feat_geo.squeeze(-1).squeeze(-1).permute((0, 2, 1)).reshape(-1, self.geo_channels))
         face_feats = (feat_xy + feat_xz + feat_yz).squeeze(-1).permute((0, 2, 1)).reshape(-1, self.img_channels // 3)
-        img = self.decoder_mlp(face_feats)
+        img = self.decoder_mlp(torch.cat([face_feats, geo_feat], 1))
         return img
 
 

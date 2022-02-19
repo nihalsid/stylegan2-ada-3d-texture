@@ -165,7 +165,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
     def process_real_image(self, path):
         pad_size = int(self.image_size * 0.1)
-        resize = T.Resize(size=(self.image_size - 2 * pad_size, self.image_size - 2 * pad_size), interpolation=InterpolationMode.LANCZOS)
+        resize = T.Resize(size=(self.image_size - 2 * pad_size, self.image_size - 2 * pad_size), interpolation=InterpolationMode.BICUBIC)
         pad = T.Pad(padding=(pad_size, pad_size), fill=1)
         t_image = pad(torch.from_numpy(np.array(resize(Image.open(str(path)))).transpose((2, 0, 1))).float() / 127.5 - 1)
         return self.cspace_convert(t_image.unsqueeze(0))
