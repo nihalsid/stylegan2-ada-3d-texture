@@ -194,11 +194,12 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         pad_size = int(self.image_size * 0.1)
         resize = T.Resize(size=(self.image_size - 2 * pad_size, self.image_size - 2 * pad_size), interpolation=InterpolationMode.NEAREST)
         pad = T.Pad(padding=(pad_size, pad_size), fill=0)
+        mask_im = read_image(str(path))[:1, :, :]
         if self.erode:
-            eroded_mask = self.erode_mask(read_image(str(path)))
+            eroded_mask = self.erode_mask(mask_im)
         else:
-            eroded_mask = read_image(str(path))
-        t_mask = pad(resize((eroded_mask > 0).float()))
+            eroded_mask = mask_im
+        t_mask = pad(resize((eroded_mask > 128).float()))
         return t_mask.unsqueeze(0)
 
     def load_pair_meta(self, pairmeta_path):

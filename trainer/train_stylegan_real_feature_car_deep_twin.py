@@ -265,6 +265,8 @@ class StyleGAN2Trainer(pl.LightningModule):
             self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
         if self.R is None:
             self.R = DifferentiableRenderer(self.config.image_size, "bounds", self.config.colorspace)
+        if self.config.resume_ema is not None:
+            self.ema = torch.load(self.config.resume_ema, map_location=self.device)
 
     def on_validation_start(self):
         if self.ema is None:

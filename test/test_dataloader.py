@@ -186,6 +186,7 @@ def test_uv_dataloader(config):
 
 @hydra.main(config_path='../config', config_name='stylegan2_car')
 def test_compcars_together(config):
+    config.views_per_sample = 8
     from dataset.meshcar_real_features_ff2 import FaceGraphMeshDataset
     dataset = FaceGraphMeshDataset(config)
     dataloader = GraphDataLoader(dataset, batch_size=1, num_workers=0)
@@ -199,11 +200,11 @@ def test_compcars_together(config):
             rendered_color_gt = render_helper.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(batch["y"][:, :3], batch), batch["ranges"].cpu(), batch['bg']).permute((0, 3, 1, 2))
             batch['real'] = dataset.cspace_convert_back(batch['real'])
             rendered_color_gt = dataset.cspace_convert_back(rendered_color_gt)
-            save_image(torch.cat([batch['real'], batch['mask'].expand(-1, 3, -1, -1), rendered_color_gt]), f"runs/images_compare/test_view_{batch_idx:04d}.png", nrow=4, value_range=(-1, 1), normalize=True)
+            save_image(torch.cat([batch['real'], batch['mask'].expand(-1, 3, -1, -1), rendered_color_gt]), f"runs/images_compare/{batch['name'][0]}.png", nrow=4, value_range=(-1, 1), normalize=True)
 
 
 if __name__ == '__main__':
     # test_view_angles_together()
     # test_uv_dataloader()
-    # test_compcars_together()
-    test_pigan_dataloader()
+    test_compcars_together()
+    # test_pigan_dataloader()

@@ -10,8 +10,10 @@
 
 dataset_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold_processed_ff2
 mesh_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold
-image_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/exemplars
-mask_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/exemplars_mask
+# dataset_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold_combined_processed
+# mesh_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold_combined
+image_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/exemplars_highres
+mask_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/exemplars_highres_mask
 uv_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_map
 silhoutte_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_mask
 
@@ -50,10 +52,14 @@ random_bg: grayscale
 colorspace: rgb
 
 image_size: 128
-render_size:
+render_size: null
 
-progressive_switch: [10e3, 70e3, 180e3]
-alpha_switch: [5e3, 10e3, 10e3]
+#progressive_switch: [10e3, 70e3, 180e3]
+#alpha_switch: [5e3, 10e3, 10e3]
+
+progressive_switch: [10e3, 40e3, 80e3, 180e3]
+alpha_switch: [5e3, 10e3, 10e3, 10e3]
+progressive_start_res: 6
 
 num_patch_per_view: 4
 patch_size: 64
@@ -94,6 +100,7 @@ create_new_resume: False
 
 wandb_main: False
 suffix: ''
+resume_ema: null
 
 preload: False
 

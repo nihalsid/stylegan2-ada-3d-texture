@@ -14,8 +14,8 @@ from dataset.mesh_real_features import FaceGraphMeshDataset
 from dataset import to_vertex_colors_scatter, GraphDataLoader, to_device
 from model.augment import AugmentPipe
 from model.differentiable_renderer import DifferentiableRenderer
-from model.graph import TwinGraphEncoder
-from model.graph_generator_u_deep import Generator
+from model.graph import GraphEncoder
+from model.graph_generator_u_6k import Generator
 from model.discriminator import Discriminator
 from model.loss import PathLengthPenalty, compute_gradient_penalty
 from trainer import create_trainer
@@ -39,7 +39,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.val_set = FaceGraphMeshDataset(config, config.num_eval_images)
         self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max)
         self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
-        self.E = TwinGraphEncoder(self.train_set.num_feats, 1)
+        self.E = GraphEncoder(self.train_set.num_feats)
         self.R = None
         self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size, config.views_per_sample, config.colorspace)
         # print_module_summary(self.G, (torch.zeros(self.config.batch_size, self.config.latent_dim), ))
@@ -210,7 +210,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         return z1, z2
 
     def set_shape_codes(self, batch):
-        code = self.E(batch['x'], batch['graph_data']['ff2_maps'][0], batch['graph_data'])
+        code = self.E(batch['x'], batch['graph_data'])
         batch['shape'] = code
 
     def train_dataloader(self):

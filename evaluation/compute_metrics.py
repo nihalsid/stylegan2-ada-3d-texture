@@ -16,7 +16,117 @@ OUTPUT_DIR = Path("/cluster_HDD/gondor/ysiddiqui/surface_gan_eval/photoshape")
 REAL_DIR = Path("/cluster_HDD/gondor/ysiddiqui/surface_gan_eval/photoshape/real")
 
 
-# TODO: Run with EMA
+@hydra.main(config_path='../config', config_name='stylegan2')
+def render_latent(config):
+
+    from model.graph_generator_u import Generator
+    from model.graph import GraphEncoder
+    from dataset.mesh_real_features import FaceGraphMeshDataset
+    import math
+
+    config.batch_size = 1
+    config.views_per_sample = 16
+    config.image_size = 512
+    config.render_size = 512
+    config.num_mapping_layers = 5
+    config.g_channel_base = 32768
+    config.mbstd_on = True
+
+    num_random_latent = 100
+    OUTPUT_DIR_OURS_IMAGES = OUTPUT_DIR / "ours_vis" / "images"
+    OUTPUT_DIR_OURS_CODES = OUTPUT_DIR / "ours_vis" / "codes"
+    OUTPUT_DIR_OURS_IMAGES.mkdir(exist_ok=True, parents=True)
+    OUTPUT_DIR_OURS_CODES.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/21011752_StyleGAN23D_fg3bgg-lrd1g14-v2m5-1024/checkpoints/_epoch=129.ckpt"
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
+
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
+    E = GraphEncoder(eval_dataset.num_feats).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
+    state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
+    G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
+    G.eval()
+    E.eval()
+    interesting_indices = [
+        0, 1, 2, 5, 7, 8, 9, 11, 13, 15, 24, 41, 48, 55, 61, 97, 99, 107, 119, 123, 159, 195, 211, 218, 279, 287,
+        314, 322, 356, 379, 405, 474, 628, 631, 696, 708, 724, 726, 762, 776, 781, 792, 794, 814, 842, 861, 868, 873,
+        887, 888, 889, 891, 914, 930, 975, 988, 1064, 1075, 1097, 1151, 1155, 1168, 1170, 1176, 1188, 1222, 1226, 1230,
+        1231, 1233, 1237, 1240, 1328, 1337, 1371, 1373, 1445, 1463, 1466, 1469, 1480, 1482, 1502, 1503, 1505, 1510, 1513,
+        1517, 1603, 1604, 1620, 1625, 1626, 1642, 1690, 1693, 1702, 1707, 1711, 1740, 1790, 1799, 1808, 1821, 1824, 1829,
+        1840, 1852, 1853, 1871, 1875, 1925, 1927, 1952, 1955, 1959, 1962, 1963, 1972, 2018, 2024, 2067, 2095, 2158, 2198,
+        2245, 2244, 2250, 2266, 2291, 2311, 2481, 2482, 2620, 2683, 2883, 2891, 2914, 2929, 3018, 3040, 3065, 3146, 3150,
+        3154, 3322, 3323, 3482, 3581, 3665, 3669, 3762, 3787, 3817, 3874, 3885, 3932, 3950, 3954, 4848, 4883
+    ]
+    print("#II:", len(interesting_indices))
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        if iter_idx not in interesting_indices:
+            continue
+        eval_batch = to_device(batch, device)
+        shape = E(eval_batch['x'], eval_batch['graph_data'])
+        (OUTPUT_DIR_OURS_IMAGES / f"{iter_idx:04d}").mkdir(exist_ok=True)
+        (OUTPUT_DIR_OURS_CODES / f"{iter_idx:04d}").mkdir(exist_ok=True)
+        for z_idx in range(num_random_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const', )
+            fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
+            torch.save(z.cpu(), OUTPUT_DIR_OURS_CODES / f"{iter_idx:04d}" / f"{z_idx:04d}.pt")
+            save_image(fake_render, OUTPUT_DIR_OURS_IMAGES / f"{iter_idx:04d}" / f"{z_idx:04d}.jpg", nrow=int(math.sqrt(config.views_per_sample)), value_range=(-1, 1), normalize=True)
+
+
+@hydra.main(config_path='../config', config_name='stylegan2')
+def render_mesh(config):
+    from model.graph_generator_u import Generator
+    from model.graph import GraphEncoder
+    from dataset.mesh_real_features import FaceGraphMeshDataset
+    import trimesh
+
+    config.batch_size = 1
+    config.views_per_sample = 1
+    config.image_size = 512
+    config.render_size = 512
+    config.num_mapping_layers = 5
+    config.g_channel_base = 32768
+    config.mbstd_on = True
+
+    OUTPUT_DIR_OURS_MESHES = OUTPUT_DIR / "ours_vis" / "meshes"
+    OUTPUT_DIR_OURS_CODES = OUTPUT_DIR / "ours_vis" / "codes"
+    OUTPUT_DIR_OURS_MESHES.mkdir(exist_ok=True, parents=True)
+
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/21011752_StyleGAN23D_fg3bgg-lrd1g14-v2m5-1024/checkpoints/_epoch=129.ckpt"
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
+
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
+    E = GraphEncoder(eval_dataset.num_feats).to(device)
+    state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
+    G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
+    G.eval()
+    E.eval()
+
+    eval_mesh_ids = [9, 48, 2482, 3065]
+    eval_mesh_codes = [[9, 10, 52], [3, 68, 11], [0, 91, 27], [34, 61, 55]]
+
+    with torch.no_grad():
+        for iter_idx, batch in enumerate(tqdm(eval_loader)):
+            if iter_idx not in eval_mesh_ids:
+                continue
+            eval_batch = to_device(batch, device)
+            shape = E(eval_batch['x'], eval_batch['graph_data'])
+            for z_idx in eval_mesh_codes[eval_mesh_ids.index(iter_idx)]:
+                z = torch.load(OUTPUT_DIR_OURS_CODES / f'{iter_idx:04d}' / f'{z_idx:04d}.pt').to(device)
+                fake = G(eval_batch['graph_data'], z, shape, noise_mode='const', )
+                vertex_colors = ((torch.clamp(to_vertex_colors_scatter(fake, batch), -1, 1) * 0.5 + 0.5) * 255).int()
+                mesh = trimesh.load(Path(config.mesh_path) / batch['name'][0] / "model_normalized.obj", process=False)
+                out_mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=vertex_colors.cpu().numpy(), process=False)
+                out_mesh.export(OUTPUT_DIR_OURS_MESHES / f"{iter_idx:04d}_{z_idx:04d}.obj")
+
 
 def render_faces(R, face_colors, batch, render_size, image_size):
     rendered_color = R.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(face_colors, batch), batch["ranges"].cpu(), resolution=render_size)
@@ -252,9 +362,9 @@ def evaluate_triplane_gan(config):
     compute_fid(OUTPUT_DIR_EG3D, REAL_DIR, OUTPUT_DIR_EG3D.parent / f"score_eg3d_{config.views_per_sample}_{num_latent}.txt", device)
 
 
-# Ours
+# Ours old
 @hydra.main(config_path='../config', config_name='stylegan2')
-def evaluate_our_gan(config):
+def evaluate_our_gan_old(config):
     from model.graph_generator_u import Generator
     from model.graph import GraphEncoder
     from dataset.mesh_real_features import FaceGraphMeshDataset
@@ -298,27 +408,305 @@ def evaluate_our_gan(config):
 
 # Ours
 @hydra.main(config_path='../config', config_name='stylegan2')
-def render_latent(config):
+def evaluate_our_gan(config):
+    from model.graph_generator_u_deep import Generator
+    from model.graph import TwinGraphEncoder
+    from dataset.mesh_real_features import FaceGraphMeshDataset
+    config.batch_size = 1
+    config.views_per_sample = 4
+    config.image_size = 256
+    config.render_size = 1024
+    config.num_mapping_layers = 5
+    config.g_channel_base = 32768
+    config.g_channel_max = 768
 
-    from model.graph_generator_u import Generator
+    num_latent = 1
+
+    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ours_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_OURS.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/15021601_StyleGAN23D_fg3bgg-big-lrd1g14-v2m5-1K512/checkpoints/_epoch=119.ckpt"
+    CHECKPOINT_EMA = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/15021601_StyleGAN23D_fg3bgg-big-lrd1g14-v2m5-1K512/checkpoints/ema_000076439.pth"
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
+
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
+    E = TwinGraphEncoder(eval_dataset.num_feats, 1).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
+    state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
+    G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    ema = torch.load(CHECKPOINT_EMA, map_location=device)
+    ema.copy_to([p for p in G.parameters() if p.requires_grad])
+    E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
+    G.eval()
+    E.eval()
+
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        eval_batch = to_device(batch, device)
+        shape = E(eval_batch['x'], eval_batch['graph_data']['ff2_maps'][0], eval_batch['graph_data'])
+        for z_idx in range(num_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const')
+            fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
+
+    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ours_{config.views_per_sample}_{num_latent}.txt", device)
+
+
+@hydra.main(config_path='../config', config_name='stylegan2')
+def ablate_our_gan_no_feat(config):
+    from model.graph_generator_u_deep import Generator
     from model.graph import GraphEncoder
     from dataset.mesh_real_features import FaceGraphMeshDataset
-    import math
-
     config.batch_size = 1
-    config.views_per_sample = 16
-    config.image_size = 512
+    config.views_per_sample = 4
+    config.image_size = 256
+    config.render_size = 256
+    config.num_mapping_layers = 5
+
+    num_latent = 1
+
+    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ablate_no_feat_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_OURS.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/18020231_StyleGAN23D_bgg-nofeat-lrd1g14-v2m5-256/checkpoints/_epoch=99.ckpt"
+    CHECKPOINT_EMA = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/18020231_StyleGAN23D_bgg-nofeat-lrd1g14-v2m5-256/checkpoints/ema_000127399.pth"
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
+
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
+    E = GraphEncoder(eval_dataset.num_feats).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
+    state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
+    G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    ema = torch.load(CHECKPOINT_EMA, map_location=device)
+    ema.copy_to([p for p in G.parameters() if p.requires_grad])
+    E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
+    G.eval()
+    E.eval()
+
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        eval_batch = to_device(batch, device)
+        shape = [torch.zeros_like(x) for x in E(eval_batch['x'], eval_batch['graph_data'])]
+        for z_idx in range(num_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const')
+            fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
+
+    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ablate_no_feat_{config.views_per_sample}_{num_latent}.txt", device)
+
+
+@hydra.main(config_path='../config', config_name='stylegan2')
+def ablate_our_gan_1_view(config):
+    from model.graph_generator_u_deep import Generator
+    from model.graph import GraphEncoder
+    from dataset.mesh_real_features import FaceGraphMeshDataset
+    config.batch_size = 1
+    config.views_per_sample = 4
+    config.image_size = 256
+    config.render_size = 512
+    config.num_mapping_layers = 8
+    config.g_channel_base = 32768
+
+    num_latent = 1
+
+    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ablate_1view_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_OURS.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/18020916_StyleGAN23D_fg3bgg-notwin-big-lrd1g14-v1m5-512/checkpoints/_epoch=119.ckpt"
+    CHECKPOINT_EMA = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/18020916_StyleGAN23D_fg3bgg-notwin-big-lrd1g14-v1m5-512/checkpoints/ema_000076439.pth"
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
+
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
+    E = GraphEncoder(eval_dataset.num_feats).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
+    state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
+    G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    ema = torch.load(CHECKPOINT_EMA, map_location=device)
+    ema.copy_to([p for p in G.parameters() if p.requires_grad])
+    E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
+    G.eval()
+    E.eval()
+
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        eval_batch = to_device(batch, device)
+        shape = E(eval_batch['x'], eval_batch['graph_data'])
+        for z_idx in range(num_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const')
+            fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
+
+    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ablate_1view_{config.views_per_sample}_{num_latent}.txt", device)
+
+
+@hydra.main(config_path='../config', config_name='stylegan2')
+def ablate_our_gan_64(config):
+    from model.graph_generator_u_deep import Generator
+    from model.graph import GraphEncoder
+    from dataset.mesh_real_features import FaceGraphMeshDataset
+    config.batch_size = 1
+    config.views_per_sample = 4
+    config.image_size = 256
+    config.render_size = 1024
+    config.num_mapping_layers = 5
+    config.g_channel_base = 32768
+
+    num_latent = 1
+
+    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ablate_64_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_OURS.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/19020403_StyleGAN23D_fg3bgg-notwin-lrd1g14-v2m5-64/checkpoints/_epoch=119.ckpt"
+    CHECKPOINT_EMA = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/19020403_StyleGAN23D_fg3bgg-notwin-lrd1g14-v2m5-64/checkpoints/ema_000076439.pth"
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
+
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
+    E = GraphEncoder(eval_dataset.num_feats).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
+    state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
+    G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    ema = torch.load(CHECKPOINT_EMA, map_location=device)
+    ema.copy_to([p for p in G.parameters() if p.requires_grad])
+    E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
+    G.eval()
+    E.eval()
+
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        eval_batch = to_device(batch, device)
+        shape = E(eval_batch['x'], eval_batch['graph_data'])
+        for z_idx in range(num_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const')
+            fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
+
+    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ablate_64_{config.views_per_sample}_{num_latent}.txt", device)
+
+
+@hydra.main(config_path='../config', config_name='stylegan2')
+def ablate_our_gan_128(config):
+    from model.graph_generator_u_deep import Generator
+    from model.graph import GraphEncoder
+    from dataset.mesh_real_features import FaceGraphMeshDataset
+    config.batch_size = 1
+    config.views_per_sample = 4
+    config.image_size = 256
+    config.render_size = 1024
+    config.num_mapping_layers = 5
+    config.g_channel_base = 32768
+
+    num_latent = 1
+
+    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ablate_128_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_OURS.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/18020722_StyleGAN23D_fg3bgg-notwin-lrd1g14-v2m5-128/checkpoints/_epoch=119.ckpt"
+    CHECKPOINT_EMA = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/18020722_StyleGAN23D_fg3bgg-notwin-lrd1g14-v2m5-128/checkpoints/ema_000076439.pth"
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
+
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
+    E = GraphEncoder(eval_dataset.num_feats).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
+    state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
+    G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    ema = torch.load(CHECKPOINT_EMA, map_location=device)
+    ema.copy_to([p for p in G.parameters() if p.requires_grad])
+    E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
+    G.eval()
+    E.eval()
+
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        eval_batch = to_device(batch, device)
+        shape = E(eval_batch['x'], eval_batch['graph_data'])
+        for z_idx in range(num_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const')
+            fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
+
+    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ablate_128_{config.views_per_sample}_{num_latent}.txt", device)
+
+
+@hydra.main(config_path='../config', config_name='stylegan2')
+def ablate_our_gan_256(config):
+    from model.graph_generator_u_deep import Generator
+    from model.graph import GraphEncoder
+    from dataset.mesh_real_features import FaceGraphMeshDataset
+    config.batch_size = 1
+    config.views_per_sample = 4
+    config.image_size = 256
     config.render_size = 512
     config.num_mapping_layers = 5
     config.g_channel_base = 32768
-    config.mbstd_on = True
 
-    num_random_latent = 100
-    OUTPUT_DIR_OURS_IMAGES = OUTPUT_DIR / "ours_vis" / "images"
-    OUTPUT_DIR_OURS_CODES = OUTPUT_DIR / "ours_vis" / "codes"
-    OUTPUT_DIR_OURS_IMAGES.mkdir(exist_ok=True, parents=True)
-    OUTPUT_DIR_OURS_CODES.mkdir(exist_ok=True, parents=True)
-    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/21011752_StyleGAN23D_fg3bgg-lrd1g14-v2m5-1024/checkpoints/_epoch=129.ckpt"
+    num_latent = 1
+
+    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ablate_256_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_OURS.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/18020840_StyleGAN23D_fg3bgg-notwin-lrd1g14-v2m5-256/checkpoints/_epoch=119.ckpt"
+    CHECKPOINT_EMA = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/18020840_StyleGAN23D_fg3bgg-notwin-lrd1g14-v2m5-256/checkpoints/ema_000076439.pth"
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
+
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
+    E = GraphEncoder(eval_dataset.num_feats).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
+    state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
+    G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    ema = torch.load(CHECKPOINT_EMA, map_location=device)
+    ema.copy_to([p for p in G.parameters() if p.requires_grad])
+    E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
+    G.eval()
+    E.eval()
+
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        eval_batch = to_device(batch, device)
+        shape = E(eval_batch['x'], eval_batch['graph_data'])
+        for z_idx in range(num_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const')
+            fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
+
+    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ablate_256_{config.views_per_sample}_{num_latent}.txt", device)
+
+
+@hydra.main(config_path='../config', config_name='stylegan2')
+def ablate_our_gan_position(config):
+    from model.graph_generator_u import Generator
+    from model.graph import GraphEncoder
+    from dataset.mesh_real_features import FaceGraphMeshDataset
+    config.batch_size = 1
+    config.views_per_sample = 4
+    config.image_size = 256
+    config.render_size = 512
+    config.num_mapping_layers = 5
+    config.g_channel_base = 32768
+    config.g_channel_max = 512
+    config.features = "position"
+    num_latent = 1
+
+    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ablate_position_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_OURS.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/22011039_StyleGAN23D_pos_fg3bgg-lrd1g14-v2m5-256/checkpoints/_epoch=89.ckpt"
 
     device = torch.device("cuda:0")
     eval_dataset = FaceGraphMeshDataset(config)
@@ -332,53 +720,38 @@ def render_latent(config):
     E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
     G.eval()
     E.eval()
-    interesting_indices = [
-        0, 1, 2, 5, 7, 8, 9, 11, 13, 15, 24, 41, 48, 55, 61, 97, 99, 107, 119, 123, 159, 195, 211, 218, 279, 287,
-        314, 322, 356, 379, 405, 474, 628, 631, 696, 708, 724, 726, 762, 776, 781, 792, 794, 814, 842, 861, 868, 873,
-        887, 888, 889, 891, 914, 930, 975, 988, 1064, 1075, 1097, 1151, 1155, 1168, 1170, 1176, 1188, 1222, 1226, 1230,
-        1231, 1233, 1237, 1240, 1328, 1337, 1371, 1373, 1445, 1463, 1466, 1469, 1480, 1482, 1502, 1503, 1505, 1510, 1513,
-        1517, 1603, 1604, 1620, 1625, 1626, 1642, 1690, 1693, 1702, 1707, 1711, 1740, 1790, 1799, 1808, 1821, 1824, 1829,
-        1840, 1852, 1853, 1871, 1875, 1925, 1927, 1952, 1955, 1959, 1962, 1963, 1972, 2018, 2024, 2067, 2095, 2158, 2198,
-        2245, 2244, 2250, 2266, 2291, 2311, 2481, 2482, 2620, 2683, 2883, 2891, 2914, 2929, 3018, 3040, 3065, 3146, 3150,
-        3154, 3322, 3323, 3482, 3581, 3665, 3669, 3762, 3787, 3817, 3874, 3885, 3932, 3950, 3954, 4848, 4883
-    ]
-    print("#II:", len(interesting_indices))
+
     for iter_idx, batch in enumerate(tqdm(eval_loader)):
-        if iter_idx not in interesting_indices:
-            continue
         eval_batch = to_device(batch, device)
         shape = E(eval_batch['x'], eval_batch['graph_data'])
-        (OUTPUT_DIR_OURS_IMAGES / f"{iter_idx:04d}").mkdir(exist_ok=True)
-        (OUTPUT_DIR_OURS_CODES / f"{iter_idx:04d}").mkdir(exist_ok=True)
-        for z_idx in range(num_random_latent):
+        for z_idx in range(num_latent):
             z = torch.randn(config.batch_size, config.latent_dim).to(device)
-            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const', )
+            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const')
             fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
-            torch.save(z.cpu(), OUTPUT_DIR_OURS_CODES / f"{iter_idx:04d}" / f"{z_idx:04d}.pt")
-            save_image(fake_render, OUTPUT_DIR_OURS_IMAGES / f"{iter_idx:04d}" / f"{z_idx:04d}.jpg", nrow=int(math.sqrt(config.views_per_sample)), value_range=(-1, 1), normalize=True)
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
+
+    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ablate_position_{config.views_per_sample}_{num_latent}.txt", device)
 
 
-# Ours
 @hydra.main(config_path='../config', config_name='stylegan2')
-def render_mesh(config):
+def ablate_our_gan_laplacian(config):
     from model.graph_generator_u import Generator
     from model.graph import GraphEncoder
     from dataset.mesh_real_features import FaceGraphMeshDataset
-    import trimesh
-
     config.batch_size = 1
-    config.views_per_sample = 1
-    config.image_size = 512
+    config.views_per_sample = 4
+    config.image_size = 256
     config.render_size = 512
     config.num_mapping_layers = 5
     config.g_channel_base = 32768
-    config.mbstd_on = True
+    config.g_channel_max = 512
+    config.features = "laplacian"
+    num_latent = 1
 
-    OUTPUT_DIR_OURS_MESHES = OUTPUT_DIR / "ours_vis" / "meshes"
-    OUTPUT_DIR_OURS_CODES = OUTPUT_DIR / "ours_vis" / "codes"
-    OUTPUT_DIR_OURS_MESHES.mkdir(exist_ok=True, parents=True)
-
-    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/21011752_StyleGAN23D_fg3bgg-lrd1g14-v2m5-1024/checkpoints/_epoch=129.ckpt"
+    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ablate_laplacian_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_OURS.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/22011317_StyleGAN23D_lap_fg3bgg-lrd1g14-v2m5-256/checkpoints/_epoch=79.ckpt"
 
     device = torch.device("cuda:0")
     eval_dataset = FaceGraphMeshDataset(config)
@@ -386,28 +759,162 @@ def render_mesh(config):
 
     G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
     E = GraphEncoder(eval_dataset.num_feats).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
     state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
     G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
     E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
     G.eval()
     E.eval()
 
-    eval_mesh_ids = [9, 48, 2482, 3065]
-    eval_mesh_codes = [[9, 10, 52], [3, 68, 11], [0, 91, 27], [34, 61, 55]]
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        eval_batch = to_device(batch, device)
+        shape = E(eval_batch['x'], eval_batch['graph_data'])
+        for z_idx in range(num_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const')
+            fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
 
-    with torch.no_grad():
-        for iter_idx, batch in enumerate(tqdm(eval_loader)):
-            if iter_idx not in eval_mesh_ids:
-                continue
-            eval_batch = to_device(batch, device)
-            shape = E(eval_batch['x'], eval_batch['graph_data'])
-            for z_idx in eval_mesh_codes[eval_mesh_ids.index(iter_idx)]:
-                z = torch.load(OUTPUT_DIR_OURS_CODES / f'{iter_idx:04d}' / f'{z_idx:04d}.pt').to(device)
-                fake = G(eval_batch['graph_data'], z, shape, noise_mode='const', )
-                vertex_colors = ((torch.clamp(to_vertex_colors_scatter(fake, batch), -1, 1) * 0.5 + 0.5) * 255).int()
-                mesh = trimesh.load(Path(config.mesh_path) / batch['name'][0] / "model_normalized.obj", process=False)
-                out_mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=vertex_colors.cpu().numpy(), process=False)
-                out_mesh.export(OUTPUT_DIR_OURS_MESHES / f"{iter_idx:04d}_{z_idx:04d}.obj")
+    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ablate_laplacian_{config.views_per_sample}_{num_latent}.txt", device)
+
+
+@hydra.main(config_path='../config', config_name='stylegan2')
+def ablate_our_gan_ff2(config):
+    from model.graph_generator_u import Generator
+    from model.graph import GraphEncoder
+    from dataset.mesh_real_features import FaceGraphMeshDataset
+    config.batch_size = 1
+    config.views_per_sample = 4
+    config.image_size = 256
+    config.render_size = 512
+    config.num_mapping_layers = 5
+    config.g_channel_base = 32768
+    config.g_channel_max = 512
+    config.features = "ff2"
+    num_latent = 1
+
+    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ablate_ff2_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_OURS.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/22011107_StyleGAN23D_ff2_fg3bgg-lrd1g14-v2m5-256/checkpoints/_epoch=139.ckpt"
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
+
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
+    E = GraphEncoder(eval_dataset.num_feats).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
+    state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
+    G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
+    G.eval()
+    E.eval()
+
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        eval_batch = to_device(batch, device)
+        shape = E(eval_batch['x'], eval_batch['graph_data'])
+        for z_idx in range(num_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const')
+            fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
+
+    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ablate_ff2_{config.views_per_sample}_{num_latent}.txt", device)
+
+
+@hydra.main(config_path='../config', config_name='stylegan2')
+def ablate_our_gan_curvature(config):
+    from model.graph_generator_u import Generator
+    from model.graph import GraphEncoder
+    from dataset.mesh_real_features import FaceGraphMeshDataset
+    config.batch_size = 1
+    config.views_per_sample = 4
+    config.image_size = 256
+    config.render_size = 512
+    config.num_mapping_layers = 5
+    config.g_channel_base = 32768
+    config.g_channel_max = 512
+    config.features = "curvature"
+    num_latent = 1
+
+    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ablate_curvature_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_OURS.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/22011243_StyleGAN23D_curv_fg3bgg-lrd1g14-v2m5-256/checkpoints/_epoch=129.ckpt"
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
+
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
+    E = GraphEncoder(eval_dataset.num_feats).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
+    state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
+    G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
+    G.eval()
+    E.eval()
+
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        eval_batch = to_device(batch, device)
+        shape = E(eval_batch['x'], eval_batch['graph_data'])
+        for z_idx in range(num_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const')
+            fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
+
+    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ablate_curvature_{config.views_per_sample}_{num_latent}.txt", device)
+
+
+@hydra.main(config_path='../config', config_name='stylegan2')
+def ablate_our_gan_normals(config):
+    from model.graph_generator_u_deep import Generator
+    from model.graph import GraphEncoder
+    from dataset.mesh_real_features import FaceGraphMeshDataset
+    config.batch_size = 1
+    config.views_per_sample = 4
+    config.image_size = 256
+    config.render_size = 1024
+    config.num_mapping_layers = 5
+    config.g_channel_base = 32768
+    config.g_channel_max = 768
+
+    num_latent = 1
+
+    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ablate_normals_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_OURS.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/16021631_StyleGAN23D_fg3bgg-notwin-big-lrd1g14-v2m5-1K512/checkpoints/_epoch=139.ckpt"
+    CHECKPOINT_EMA = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/16021631_StyleGAN23D_fg3bgg-notwin-big-lrd1g14-v2m5-1K512/checkpoints/ema_000089179.pth"
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
+
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
+    E = GraphEncoder(eval_dataset.num_feats).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
+    state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
+    G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    ema = torch.load(CHECKPOINT_EMA, map_location=device)
+    ema.copy_to([p for p in G.parameters() if p.requires_grad])
+    E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
+    G.eval()
+    E.eval()
+
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        eval_batch = to_device(batch, device)
+        shape = E(eval_batch['x'], eval_batch['graph_data'])
+        for z_idx in range(num_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const')
+            fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
+
+    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ablate_normals_{config.views_per_sample}_{num_latent}.txt", device)
 
 
 if __name__ == "__main__":
@@ -416,5 +923,15 @@ if __name__ == "__main__":
     # evaluate_3d_parameterized_gan()
     # evaluate_our_gan()
     # evaluate_triplane_gan()
-    evaluate_texturefields_gan()
+    # evaluate_texturefields_gan()
     # render_mesh()
+    # ablate_our_gan_1_view()
+    # ablate_our_gan_no_feat()
+    # ablate_our_gan_128()
+    # ablate_our_gan_256()
+    # ablate_our_gan_64()
+    # ablate_our_gan_position()
+    # ablate_our_gan_laplacian()
+    ablate_our_gan_ff2()
+    ablate_our_gan_normals()
+    # ablate_our_gan_curvature()

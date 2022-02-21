@@ -69,6 +69,7 @@ patch_size: 64
 image_size_hres: 512
 erode: True
 camera_noise: 0.0
+resume_ema: null
 
 num_faces: [24576, 6144, 1536, 384, 96, 24]
 #image_size: 32

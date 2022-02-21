@@ -124,8 +124,13 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.log("rGP", gp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
 
     def render(self, face_colors, batch, resolution=None, use_bg_color=True):
-        rendered_color = self.R.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(face_colors, batch), batch["ranges"].cpu(), batch['bg'] if use_bg_color else None, resolution=resolution)
-        return rendered_color.permute((0, 3, 1, 2))
+        rendered_color = self.R.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(face_colors, batch), batch["ranges"].cpu(), batch['bg'] if use_bg_color else None, resolution=self.config.render_size)
+        ret_val = rendered_color.permute((0, 3, 1, 2))
+        if resolution is None:
+            resolution = self.config.image_size
+        if self.config.render_size != resolution:
+            ret_val = torch.nn.functional.interpolate(ret_val, (resolution, resolution), mode='bilinear', align_corners=True)
+        return ret_val
 
     def training_step(self, batch, batch_idx):
         self.set_shape_codes(batch)
@@ -267,6 +272,8 @@ class StyleGAN2Trainer(pl.LightningModule):
             self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
         if self.R is None:
             self.R = DifferentiableRenderer(self.config.image_size, "bounds", self.config.colorspace)
+        if self.config.resume_ema is not None:
+            self.ema = torch.load(self.config.resume_ema, map_location=self.device)
 
     def on_validation_start(self):
         if self.ema is None:
@@ -285,7 +292,7 @@ class StyleGAN2Trainer(pl.LightningModule):
         if self.state.item() != 0:
             last_update = self.config.progressive_switch[self.state.item() - 1]
         alpha = max(0, min(1, (self.global_step - last_update) / self.config.alpha_switch[self.state.item()]))
-        resolution = 2 ** (self.state.item() + 6)
+        resolution = 2 ** (self.state.item() + self.config.progressive_start_res)
         self.log(f"d_alpha", float(alpha), on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
         self.log(f"d_resolution", float(resolution), on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
         return resolution, alpha
@@ -301,6 +308,7 @@ def step(opt, module):
     for param in module.parameters():
         if param.grad is not None:
             torch.nan_to_num(param.grad, nan=0, posinf=1e5, neginf=-1e5, out=param.grad)
+    torch.nn.utils.clip_grad_norm_(module.parameters(), 1)
     opt.step()
 
 
