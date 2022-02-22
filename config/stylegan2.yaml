@@ -18,6 +18,7 @@ condition_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-
 stat_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres_stat.pt
 uv_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_map
 silhoutte_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_mask
+normals_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_normals
 mesh_resolution: 64
 
 experiment: fast_dev

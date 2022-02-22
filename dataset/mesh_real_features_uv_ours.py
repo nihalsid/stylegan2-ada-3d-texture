@@ -25,7 +25,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.random_views = config.random_views
         self.camera_noise = config.camera_noise
         self.uv_directory = Path(config.uv_path)
-        self.silhoutte_directory = Path(config.silhoutte_path)
+        self.normals_directory = Path(config.normals_path)
         self.real_images = {x.name.split('.')[0]: x for x in Path(config.image_path).iterdir() if x.name.endswith('.jpg') or x.name.endswith('.png')}
         self.masks = {x: Path(config.mask_path) / self.real_images[x].name for x in self.real_images}
         self.erode = config.erode
@@ -55,8 +55,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         vertices = pt_arxiv['vertices'].float()
         indices = pt_arxiv['indices'].int()
         uv = torch.from_numpy(np.load(str(Path(self.uv_directory, f'{selected_item}.npy')))).float()
-        silhoutte = Image.open(self.silhoutte_directory / f'{selected_item}.jpg').resize((self.image_size * 3, self.image_size * 2), resample=Image.NEAREST)
-        silhoutte = split_into_six(np.array(silhoutte)[:, :, np.newaxis])
+        normals = np.array(Image.open(self.normals_directory / f'{selected_item}.jpg').resize((self.image_size, self.image_size), resample=Image.NEAREST))
         # noinspection PyTypeChecker
         tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
         vctr = torch.tensor(list(range(vertices.shape[0]))).long()
@@ -64,7 +63,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         real_sample, real_mask, mvp, cam_positions = self.get_image_and_view(selected_item)
         background = self.color_generator(self.views_per_sample)
 
-        silhoutte = torch.nn.functional.one_hot((torch.from_numpy(silhoutte) / 255.0 == 1).long()[:, :, :, 0], num_classes=2).permute((0, 3, 1, 2)).float()
+        normals = (torch.from_numpy(normals) / 127.5 - 1).permute((2, 0, 1))
         return {
             "name": selected_item,
             "vertex_ctr": vctr,
@@ -79,7 +78,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "indices": tri_indices,
             "ranges": torch.tensor([0, tri_indices.shape[0]]).int(),
             "uv": uv,
-            "silhoutte": silhoutte,
+            "uv_normals": normals,
         }
 
     def get_image_and_view(self, shape):
@@ -222,11 +221,13 @@ def get_random_views(num_views):
     return [{'azimuth': a, 'elevation': e} for a, e in zip(azimuth, elevation)]
 
 
-def split_into_six(np_array):
-    h, w = np_array.shape[:2]
+def split_tensor_into_six(t_arr):
+    # B, C, H, W
+    h, w = t_arr.shape[2:]
     h_, w_ = h // 2, w // 3
     split_array = []
-    for i in range(2):
-        for j in range(3):
-            split_array.append(np_array[i * h_: (i + 1) * h_, j * w_: (j + 1) * w_, :])
-    return np.stack(split_array)
+    for b in range(t_arr.shape[0]):
+        for i in range(2):
+            for j in range(3):
+                split_array.append(t_arr[b: b + 1, :, i * h_: (i + 1) * h_, j * w_: (j + 1) * w_])
+    return torch.cat(split_array, dim=0)

@@ -85,7 +85,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         ret_dict = {
             "name": selected_item,
             "x": self.input_feature_extractor(pt_arxiv),
-            "y": pt_arxiv['target_colors'].float() * 2,
+            "y": pt_arxiv['input_normals'].float(),
             "vertex_ctr": vctr,
             "vertices": vertices,
             "normals": normals,

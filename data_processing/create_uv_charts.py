@@ -15,12 +15,13 @@ from PIL import Image
 @hydra.main(config_path='../config', config_name='stylegan2')
 def create_silhouttes(config):
     from dataset.mesh_real_features_atlas import FaceGraphMeshDataset
+    config.image_size = 512
     dataset = FaceGraphMeshDataset(config)
     dataloader = GraphDataLoader(dataset, batch_size=1, num_workers=0)
     render_helper = DifferentiableRenderer(config.image_size, 'bounds', config.colorspace, num_channels=4).cuda()
     Path("runs/uv_mask").mkdir(exist_ok=True)
     Path("runs/uv_positions").mkdir(exist_ok=True)
-    Path("runs/uv_texture").mkdir(exist_ok=True)
+    Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_normals").mkdir(exist_ok=True)
     for batch_idx, batch in enumerate(tqdm(dataloader)):
         batch = to_device(batch, torch.device("cuda:0"))
         rendered_color_gt = render_helper.render(batch['vertices'], batch['indices'],
@@ -46,7 +47,7 @@ def create_silhouttes(config):
         colors = Image.fromarray(torch.cat([row_0, row_1], dim=-2).permute((1, 2, 0)).cpu().numpy().astype(np.uint8))
 
         mask.save(str(Path("runs/uv_mask") / f"{batch['name'][0]}.jpg"))
-        colors.save(str(Path("runs/uv_texture") / f"{batch['name'][0]}.jpg"))
+        colors.save(str(Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_normals") / f"{batch['name'][0]}.jpg"))
         np.savez_compressed(str(Path("runs/uv_positions") / f"{batch['name'][0]}.npz"), positions)
 
 
@@ -68,6 +69,8 @@ def create_uv_mapping(proc, num_proc):
         selected_mapping = np.zeros([tmesh.vertices.shape[0], 4])
         selected_mapping[:, 3] = float('inf')
 
+        all_normals = np.array([[0., 1., 0.], [0., -1., 0.], [0., 0., -1.], [1., 0., 0.], [0., 0., 1.], [-1., 0., 0.]], dtype=np.float32)
+
         for mp_idx in range(uv_map.shape[0]):
             all_pos = uv_map[mp_idx].reshape((-1, 3))
             max_i = uv_map[mp_idx].shape[0]
@@ -80,7 +83,9 @@ def create_uv_mapping(proc, num_proc):
             pixel_coordinates = pixel_coordinates[valid_pos]
             kdtree = scipy.spatial.cKDTree(all_pos[valid_pos])
             dist, indices = kdtree.query(np.array(tmesh.vertices), k=1)
-            dmask = selected_mapping[:, 3] - dist > 0.02
+            kdtree_normals = scipy.spatial.cKDTree(all_normals)
+            dist_norm, indices_norm = kdtree_normals.query(np.array(tmesh.vertex_normals), k=1)
+            dmask = indices_norm == mp_idx
             selected_mapping[dmask, 1:3] = pixel_coordinates[indices, :][dmask, :]
             selected_mapping[dmask, 0] = mp_idx
             selected_mapping[dmask, 3] = dist[dmask]
@@ -119,6 +124,6 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--proc', default=0, type=int)
     args = parser.parse_args()
 
-    create_uv_mapping(args.proc, args.num_proc)
-    # create_silhouttes()
+    # create_uv_mapping(args.proc, args.num_proc)
+    create_silhouttes()
     # render_with_uv()
