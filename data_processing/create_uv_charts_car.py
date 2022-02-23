@@ -12,16 +12,16 @@ from model.differentiable_renderer import DifferentiableRenderer
 from PIL import Image
 
 
-@hydra.main(config_path='../config', config_name='stylegan2')
+@hydra.main(config_path='../config', config_name='stylegan2_car')
 def create_silhouttes(config):
-    from dataset.mesh_real_features_atlas import FaceGraphMeshDataset
+    from dataset.meshcar_real_features_atlas import FaceGraphMeshDataset
     config.image_size = 512
     dataset = FaceGraphMeshDataset(config)
     dataloader = GraphDataLoader(dataset, batch_size=1, num_workers=0)
     render_helper = DifferentiableRenderer(config.image_size, 'bounds', config.colorspace, num_channels=4).cuda()
-    Path("runs/uv_mask").mkdir(exist_ok=True)
-    Path("runs/uv_positions").mkdir(exist_ok=True)
-    Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_normals").mkdir(exist_ok=True)
+    Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_mask").mkdir(exist_ok=True)
+    Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_positions").mkdir(exist_ok=True)
+    Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_normals").mkdir(exist_ok=True)
     for batch_idx, batch in enumerate(tqdm(dataloader)):
         batch = to_device(batch, torch.device("cuda:0"))
         rendered_color_gt = render_helper.render(batch['vertices'], batch['indices'],
@@ -46,16 +46,16 @@ def create_silhouttes(config):
         row_1 = torch.cat([rendered_color_gt_texture[3, :, :, :], rendered_color_gt_texture[4, :, :, :], rendered_color_gt_texture[5, :, :, :]], dim=-1)
         colors = Image.fromarray(torch.cat([row_0, row_1], dim=-2).permute((1, 2, 0)).cpu().numpy().astype(np.uint8))
 
-        mask.save(str(Path("runs/uv_mask") / f"{batch['name'][0]}.jpg"))
-        colors.save(str(Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_normals") / f"{batch['name'][0]}.jpg"))
-        np.savez_compressed(str(Path("runs/uv_positions") / f"{batch['name'][0]}.npz"), positions)
+        mask.save(str(Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_mask") / f"{batch['name'][0]}.jpg"))
+        colors.save(str(Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_normals") / f"{batch['name'][0]}.jpg"))
+        np.savez_compressed(str(Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_positions") / f"{batch['name'][0]}.npz"), positions)
 
 
 def create_uv_mapping(proc, num_proc):
-    mesh_path = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres")
-    map_path = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_positions")
-    mask_path = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_mask")
-    output_path = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_map")
+    mesh_path = Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold_combined")
+    map_path = Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_positions")
+    mask_path = Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_mask")
+    output_path = Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_map")
     output_path.mkdir(exist_ok=True)
     meshes = list(mesh_path.iterdir())
     meshes = [x for i, x in enumerate(meshes) if i % num_proc == proc]
@@ -63,7 +63,7 @@ def create_uv_mapping(proc, num_proc):
         if not (map_path / f'{mesh.stem}.npz').exists():
             continue
         tmesh = trimesh.load(mesh / "model_normalized.obj", process=False)
-        uv_map = split_into_six(np.load(str(map_path / f'{mesh.stem}.npz'))['arr'])
+        uv_map = split_into_six(np.load(str(map_path / f'{mesh.stem}.npz'))['arr_0'])
         uv_mask = split_into_six(np.array(Image.open(mask_path / f'{mesh.stem}.jpg'))[:, :, np.newaxis])
 
         selected_mapping = np.zeros([tmesh.vertices.shape[0], 4])
@@ -94,9 +94,9 @@ def create_uv_mapping(proc, num_proc):
         print(mesh)
 
 
-@hydra.main(config_path='../config', config_name='stylegan2')
+@hydra.main(config_path='../config', config_name='stylegan2_car')
 def render_with_uv(config):
-    from dataset.mesh_real_features_uv import FaceGraphMeshDataset
+    from dataset.meshcar_real_features_uv import FaceGraphMeshDataset
     config.image_size = 128
     config.batch_size = 1
     dataset = FaceGraphMeshDataset(config)
@@ -106,7 +106,7 @@ def render_with_uv(config):
         batch = to_device(batch, torch.device("cuda:0"))
         texture_map = []
         for name in batch['name']:
-            texture_map.append(torch.from_numpy(split_into_six(np.array(Image.open(Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_normals") / f'{name}.jpg')))).permute(0, 3, 1, 2))
+            texture_map.append(torch.from_numpy(split_into_six(np.array(Image.open(Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_normals") / f'{name}.jpg')))).permute(0, 3, 1, 2))
         texture_map = torch.nn.functional.interpolate(torch.cat(texture_map, dim=0).to(batch['vertices'].device).float() / 255 * 2 - 1, size=(config.image_size, config.image_size), mode='bilinear', align_corners=True)
         vertices_mapped = texture_map[batch["uv"][:, 0].long(), :, (batch["uv"][:, 1] * config.image_size).long(), (batch["uv"][:, 2] * config.image_size).long()]
         rendered_texture = render_helper.render(batch['vertices'], batch['indices'], vertices_mapped, batch["ranges"].cpu(), None).permute((0, 3, 1, 2))

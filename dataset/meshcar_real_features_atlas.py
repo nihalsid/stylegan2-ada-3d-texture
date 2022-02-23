@@ -26,7 +26,6 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.dataset_directory = Path(config.dataset_path)
         self.mesh_directory = Path(config.mesh_path)
         self.image_size = config.image_size
-        self.random_views = config.random_views
         self.camera_noise = config.camera_noise
         self.real_images = {x.name.split('.')[0]: x for x in Path(config.image_path).iterdir() if x.name.endswith('.jpg') or x.name.endswith('.png')}
         self.masks = {x: Path(config.mask_path) / self.real_images[x].name for x in self.real_images}
@@ -40,10 +39,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             else:
                 self.items = self.items * limit_dataset_size
         self.target_name = "model_normalized.obj"
-        self.views_per_sample = config.views_per_sample
-        self.color_generator = random_color if config.random_bg == 'color' else (random_grayscale if config.random_bg == 'grayscale' else white)
-        self.cspace_convert = rgb_to_lab if config.colorspace == 'lab' else (lambda x: x)
-        self.cspace_convert_back = lab_to_rgb if config.colorspace == 'lab' else (lambda x: x)
+        self.views_per_sample = 6
         self.input_feature_extractor, self.num_feats = {
             "normal": (self.input_normal, 3),
             "position": (self.input_position, 3),
@@ -56,7 +52,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "normal+curvature": (self.input_normal_curvature, 5),
             "normal+laplacian+ff1+ff2+curvature": (self.input_normal_laplacian_ff1_ff2_curvature, 20),
             "semantics": (self.input_semantics, 7),
-        }[config.features]
+        }["position"]
         self.real_images_preloaded, self.masks_preloaded = {}, {}
         if config.preload:
             self.preload_real_images()
@@ -83,15 +79,13 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
         vctr = torch.tensor(list(range(vertices.shape[0]))).long()
 
-        real_sample, real_mask, mvp, cam_positions = self.get_image_and_view()
-        background = self.color_generator(self.views_per_sample)
+        real_sample, real_mask, mvp, cam_positions = self.get_image_and_view(selected_item)
+        background = white(self.views_per_sample)
 
-        background = self.cspace_convert(background)
-
-        return {
+        ret_dict = {
             "name": selected_item,
             "x": self.input_feature_extractor(pt_arxiv),
-            "y": self.cspace_convert(pt_arxiv['input_normals'].float()),
+            "y": pt_arxiv['input_normals'].float(),
             "vertex_ctr": vctr,
             "vertices": vertices,
             "normals": normals,
@@ -105,6 +99,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "ranges": torch.tensor([0, tri_indices.shape[0]]).int(),
             "graph_data": self.get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, lateral_maps, is_pad, level_masks)
         }
+        return ret_dict
 
     @staticmethod
     def get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, lateral_maps, is_pad, level_masks):
@@ -123,11 +118,10 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     def batch_mask(t, graph_data, idx, level=0):
         return t[graph_data['level_masks'][level] == idx]
 
-    def get_image_and_view(self):
+    def get_image_and_view(self, shape):
         total_selections = len(self.real_images.keys()) // 8
-        available_views = get_car_views()
+        sampled_view = get_uv_views()
         view_indices = random.sample(list(range(8)), self.views_per_sample)
-        sampled_view = [available_views[vidx] for vidx in view_indices]
         image_indices = random.sample(list(range(total_selections)), self.views_per_sample)
         image_selections = [f'{(iidx * 8 + vidx):05d}' for (iidx, vidx) in zip(image_indices, view_indices)]
         images, masks, cameras, cam_positions = [], [], [], []
@@ -163,10 +157,10 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
     def process_real_image(self, path):
         pad_size = int(self.image_size * 0.1)
-        resize = T.Resize(size=(self.image_size - 2 * pad_size, self.image_size - 2 * pad_size), interpolation=InterpolationMode.LANCZOS)
+        resize = T.Resize(size=(self.image_size - 2 * pad_size, self.image_size - 2 * pad_size), interpolation=InterpolationMode.BICUBIC)
         pad = T.Pad(padding=(pad_size, pad_size), fill=1)
         t_image = pad(torch.from_numpy(np.array(resize(Image.open(str(path)))).transpose((2, 0, 1))).float() / 127.5 - 1)
-        return self.cspace_convert(t_image.unsqueeze(0))
+        return t_image.unsqueeze(0)
 
     def export_mesh(self, name, face_colors, output_path):
         try:
@@ -192,11 +186,12 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         pad_size = int(self.image_size * 0.1)
         resize = T.Resize(size=(self.image_size - 2 * pad_size, self.image_size - 2 * pad_size), interpolation=InterpolationMode.NEAREST)
         pad = T.Pad(padding=(pad_size, pad_size), fill=0)
+        mask_im = read_image(str(path))[:1, :, :]
         if self.erode:
-            eroded_mask = self.erode_mask(read_image(str(path)))
+            eroded_mask = self.erode_mask(mask_im)
         else:
-            eroded_mask = read_image(str(path))
-        t_mask = pad(resize((eroded_mask > 0).float()))
+            eroded_mask = mask_im
+        t_mask = pad(resize((eroded_mask > 128).float()))
         return t_mask.unsqueeze(0)
 
     def load_pair_meta(self, pairmeta_path):
@@ -288,53 +283,7 @@ def white(num_views):
     return torch.from_numpy(np.array([1, 1, 1]).reshape((1, 3, 1, 1))).expand(num_views, -1, -1, -1).float()
 
 
-def get_car_views():
-    # front, back, right, left, front_right, front_left, back_right, back_left
-    azimuth = [3 * math.pi / 2, math.pi / 2,
-               0, math.pi,
-               math.pi + math.pi / 3, 0 - math.pi / 3,
-               math.pi / 2 + math.pi / 6, math.pi / 2 - math.pi / 6]
-    azimuth_noise = [0, 0,
-                     0, 0,
-                     (random.random() - 0.5) * math.pi / 8, (random.random() - 0.5) * math.pi / 8,
-                     (random.random() - 0.5) * math.pi / 8, (random.random() - 0.5) * math.pi / 8,]
-    elevation = [math.pi / 2, math.pi / 2,
-                 math.pi / 2, math.pi / 2,
-                 math.pi / 2 - math.pi / 48, math.pi / 2 - math.pi / 48,
-                 math.pi / 2 - math.pi / 48, math.pi / 2 - math.pi / 48]
-    elevation_noise = [-random.random() * math.pi / 70, -random.random() * math.pi / 70,
-                       0, 0,
-                       -random.random() * math.pi / 32, -random.random() * math.pi / 32,
-                       0, 0]
-    return [{'azimuth': a + an, 'elevation': e + en, 'fov': 40} for a, an, e, en in zip(azimuth, azimuth_noise, elevation, elevation_noise)]
-
-
-def rgb_to_lab(rgb_normed):
-    permute = (lambda x: x.permute((0, 2, 3, 1))) if len(rgb_normed.shape) == 4 else (lambda x: x)
-    permute_back = (lambda x: x.permute((0, 3, 1, 2))) if len(rgb_normed.shape) == 4 else (lambda x: x)
-    device = rgb_normed.device
-    rgb_normed = permute(rgb_normed).cpu().numpy()
-    lab_arr = color.rgb2lab(((rgb_normed * 0.5 + 0.5) * 255).astype(np.uint8))
-    lab_arr = torch.from_numpy(lab_arr).float().to(device)
-    lab_arr[..., 0] = lab_arr[..., 0] / 50. - 1
-    lab_arr[..., 1] = lab_arr[..., 1] / 100
-    lab_arr[..., 2] = lab_arr[..., 2] / 100
-    lab_arr = permute_back(lab_arr).contiguous()
-    return lab_arr
-
-
-def lab_to_rgb(lab_normed):
-    permute = (lambda x: x.permute((0, 2, 3, 1))) if len(lab_normed.shape) == 4 else (lambda x: x)
-    permute_back = (lambda x: x.permute((0, 3, 1, 2))) if len(lab_normed.shape) == 4 else (lambda x: x)
-    device = lab_normed.device
-    lab_normed = permute(lab_normed)
-    lab_normed[..., 0] = torch.clamp((lab_normed[..., 0] * 0.5 + 0.5) * 100, 0, 99)
-    lab_normed[..., 1] = torch.clamp(lab_normed[..., 1] * 100, -100, 100)
-    lab_normed[..., 2] = torch.clamp(lab_normed[..., 2] * 100, -100, 100)
-    lab_normed = lab_normed.cpu().numpy()
-    rgb_arr = color.lab2rgb(lab_normed)
-    rgb_arr = torch.from_numpy(rgb_arr).to(device)
-    rgb_arr = permute_back(rgb_arr)
-    rgb_normed = rgb_arr * 2 - 1
-    return rgb_normed
-
+def get_uv_views():
+    azimuth = [0.0, 0.0] + np.arange(0, 2 * math.pi, math.pi * 0.5).tolist()
+    elevation = [math.pi * 2, math.pi, math.pi / 2, math.pi / 2, math.pi / 2, math.pi / 2]
+    return [{'fov': 50, 'azimuth': a, 'elevation': e} for a, e in zip(azimuth, elevation)]

@@ -8,14 +8,15 @@
 #mesh_path: /cluster/gimli/ysiddiqui/CADTextures/SingleShape-model/CubeTexturesForGraphQuad32
 #mesh_resolution: 64
 
-dataset_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold_processed_ff2
-mesh_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold
+dataset_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold_combined_processed
+mesh_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold_combined
 # dataset_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold_combined_processed
 # mesh_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold_combined
 image_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/exemplars_highres
 mask_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/exemplars_highres_mask
-uv_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_map
-silhoutte_path: /cluster/gimli/ysiddiqui/CADTextures/Photoshape/uv_mask
+uv_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_map
+silhoutte_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_mask
+normals_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_normals
 
 experiment: fast_dev
 seed: null

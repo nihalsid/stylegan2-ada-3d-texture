@@ -149,6 +149,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         mask = torch.cat(masks, dim=0)
         mvp = torch.stack(cameras, dim=0)
         cam_positions = torch.stack(cam_positions, dim=0)
+        image = image * mask.expand(-1, 3, -1, -1) + (1 - mask).expand(-1, 3, -1, -1) * torch.ones_like(image)
         return image, mask, mvp, cam_positions
 
     def get_real_image(self, name):

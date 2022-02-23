@@ -19,38 +19,44 @@ REAL_DIR = Path("/cluster_HDD/gondor/ysiddiqui/surface_gan_eval/photoshape/real"
 @hydra.main(config_path='../config', config_name='stylegan2')
 def render_latent(config):
 
-    from model.graph_generator_u import Generator
-    from model.graph import GraphEncoder
+    from model.graph_generator_u_deep import Generator
+    from model.graph import TwinGraphEncoder
     from dataset.mesh_real_features import FaceGraphMeshDataset
     import math
 
     config.batch_size = 1
-    config.views_per_sample = 16
+    config.views_per_sample = 9
     config.image_size = 512
     config.render_size = 512
     config.num_mapping_layers = 5
     config.g_channel_base = 32768
-    config.mbstd_on = True
+    config.g_channel_max = 768
 
     num_random_latent = 100
     OUTPUT_DIR_OURS_IMAGES = OUTPUT_DIR / "ours_vis" / "images"
     OUTPUT_DIR_OURS_CODES = OUTPUT_DIR / "ours_vis" / "codes"
     OUTPUT_DIR_OURS_IMAGES.mkdir(exist_ok=True, parents=True)
     OUTPUT_DIR_OURS_CODES.mkdir(exist_ok=True, parents=True)
-    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/21011752_StyleGAN23D_fg3bgg-lrd1g14-v2m5-1024/checkpoints/_epoch=129.ckpt"
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/15021601_StyleGAN23D_fg3bgg-big-lrd1g14-v2m5-1K512/checkpoints/_epoch=119.ckpt"
+    CHECKPOINT_EMA = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/15021601_StyleGAN23D_fg3bgg-big-lrd1g14-v2m5-1K512/checkpoints/ema_000076439.pth"
 
     device = torch.device("cuda:0")
     eval_dataset = FaceGraphMeshDataset(config)
     eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
 
+    z_all = torch.randn(num_random_latent, config.batch_size, config.latent_dim).to(device)
+
     G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
-    E = GraphEncoder(eval_dataset.num_feats).to(device)
+    E = TwinGraphEncoder(eval_dataset.num_feats, 1).to(device)
     R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
     state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
     G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    ema = torch.load(CHECKPOINT_EMA, map_location=device)
+    ema.copy_to([p for p in G.parameters() if p.requires_grad])
     E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
     G.eval()
     E.eval()
+
     interesting_indices = [
         0, 1, 2, 5, 7, 8, 9, 11, 13, 15, 24, 41, 48, 55, 61, 97, 99, 107, 119, 123, 159, 195, 211, 218, 279, 287,
         314, 322, 356, 379, 405, 474, 628, 631, 696, 708, 724, 726, 762, 776, 781, 792, 794, 814, 842, 861, 868, 873,
@@ -66,11 +72,11 @@ def render_latent(config):
         if iter_idx not in interesting_indices:
             continue
         eval_batch = to_device(batch, device)
-        shape = E(eval_batch['x'], eval_batch['graph_data'])
+        shape = E(eval_batch['x'], eval_batch['graph_data']['ff2_maps'][0], eval_batch['graph_data'])
         (OUTPUT_DIR_OURS_IMAGES / f"{iter_idx:04d}").mkdir(exist_ok=True)
         (OUTPUT_DIR_OURS_CODES / f"{iter_idx:04d}").mkdir(exist_ok=True)
         for z_idx in range(num_random_latent):
-            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            z = z_all[z_idx]
             fake = G(eval_batch['graph_data'], z, shape, noise_mode='const', )
             fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
             torch.save(z.cpu(), OUTPUT_DIR_OURS_CODES / f"{iter_idx:04d}" / f"{z_idx:04d}.pt")
@@ -924,6 +930,7 @@ if __name__ == "__main__":
     # evaluate_our_gan()
     # evaluate_triplane_gan()
     # evaluate_texturefields_gan()
+    render_latent()
     # render_mesh()
     # ablate_our_gan_1_view()
     # ablate_our_gan_no_feat()
@@ -932,6 +939,6 @@ if __name__ == "__main__":
     # ablate_our_gan_64()
     # ablate_our_gan_position()
     # ablate_our_gan_laplacian()
-    ablate_our_gan_ff2()
-    ablate_our_gan_normals()
+    # ablate_our_gan_ff2()
+    # ablate_our_gan_normals()
     # ablate_our_gan_curvature()

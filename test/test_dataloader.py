@@ -231,9 +231,31 @@ def test_uv_ours_dataloader(config):
         save_image(texture_atlas_raw, f"runs/images_fake/atlas_{batch_idx:04d}.png", value_range=(-1, 1), normalize=True)
 
 
+@hydra.main(config_path='../config', config_name='stylegan2_car')
+def test_uv_cars_dataloader(config):
+    from dataset.meshcar_real_features_uv import FaceGraphMeshDataset
+    config.views_per_sample = 1
+    dataset = FaceGraphMeshDataset(config)
+    dataloader = GraphDataLoader(dataset, batch_size=config.batch_size, num_workers=0)
+    render_helper = DifferentiableRenderer(config.image_size, 'bounds').cuda()
+    Path("runs/images_fake").mkdir(exist_ok=True)
+    colors = torch.tensor([[0.18, 0.545, 0.02], [1, 0.647, 0], [0, 1, 0], [0, 0, 1], [0.118, 0.565, 1], [1, 0.078, 0.576]]).to(torch.device("cuda:0"))
+    for batch_idx, batch in enumerate(tqdm(dataloader)):
+        batch = to_device(batch, torch.device("cuda:0"))
+        batch['real'] = dataset.get_color_bg_real(batch)
+        texture_atlas = torch.zeros((config.batch_size, 6, 3, config.image_size, config.image_size)).to(batch['uv'].device)
+        for c in range(6):
+            texture_atlas[:, c, :, :, :] = -1 + 2 * colors[c][None, :, None, None]
+        texture_atlas = texture_atlas.reshape((-1, texture_atlas.shape[2], texture_atlas.shape[3], texture_atlas.shape[4]))
+        vertices_mapped = texture_atlas[batch["uv"][:, 0].long(), :, (batch["uv"][:, 1] * config.image_size).long(), (batch["uv"][:, 2] * config.image_size).long()]
+        vertices_mapped = torch.cat([vertices_mapped, torch.ones((vertices_mapped.shape[0], 1), device=vertices_mapped.device)], dim=-1)
+        rendered_color = render_helper.render(batch['vertices'], batch['indices'], vertices_mapped, batch["ranges"].cpu(), None)
+        save_image(torch.cat([rendered_color.permute((0, 3, 1, 2)), batch['real']], 0), f"runs/images_fake/test_view_{batch_idx:04d}.png", nrow=4, value_range=(-1, 1), normalize=True)
+
+
 if __name__ == '__main__':
     # test_view_angles_together()
-    # test_uv_dataloader()
-    test_uv_ours_dataloader()
+    test_uv_cars_dataloader()
+    # test_uv_ours_dataloader()
     # test_compcars_together()
     # test_pigan_dataloader()
