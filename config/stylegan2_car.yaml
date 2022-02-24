@@ -14,7 +14,7 @@ mesh_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold_combined
 # mesh_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold_combined
 image_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/exemplars_highres
 mask_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/exemplars_highres_mask
-uv_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_map
+uv_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_map_first
 silhoutte_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_mask
 normals_path: /cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_normals
 
@@ -47,7 +47,7 @@ ada_fixed: False
 g_channel_base: 16384
 d_channel_base: 16384
 features: normal
-p_synthetic: 1.0
+p_synthetic: 0.0
 
 random_bg: grayscale
 colorspace: rgb

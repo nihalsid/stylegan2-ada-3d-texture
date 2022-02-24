@@ -251,6 +251,41 @@ def test_uv_cars_dataloader(config):
         vertices_mapped = torch.cat([vertices_mapped, torch.ones((vertices_mapped.shape[0], 1), device=vertices_mapped.device)], dim=-1)
         rendered_color = render_helper.render(batch['vertices'], batch['indices'], vertices_mapped, batch["ranges"].cpu(), None)
         save_image(torch.cat([rendered_color.permute((0, 3, 1, 2)), batch['real']], 0), f"runs/images_fake/test_view_{batch_idx:04d}.png", nrow=4, value_range=(-1, 1), normalize=True)
+        save_image(texture_atlas[:6], f"runs/images_fake/atlas.jpg", n_row=3, value_range=(-1, 1), normalize=True)
+
+@hydra.main(config_path='../config', config_name='stylegan2_car')
+def test_grid_cars_dataloader(config):
+    from model.styleganvox.generator import Generator
+    from model.styleganvox import SDFEncoder
+    from model.raycast_rgbd.raycast_rgbd import Raycast2DHandler
+    from dataset.meshcar_real_sdfgrid import SDFGridDataset
+    from PIL import Image
+    import numpy as np
+    batch_size, render_shape = 4, (config.image_size, config.image_size)
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, 64, 3).cuda()
+    E = SDFEncoder(1).cuda()
+    dataset = SDFGridDataset(config)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    Path("runs/images_sdf").mkdir(exist_ok=True)
+    dims = (64, 64, 64)
+    voxel_size = 0.03125
+    trunc = 5 * voxel_size
+    raycast_handler = Raycast2DHandler(torch.device("cuda"), batch_size, dims, render_shape, voxel_size, trunc)
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(tqdm(dataloader)):
+            batch = to_device(batch, torch.device("cuda"))
+            shape = E(batch["x"])
+            fake_grid = G(torch.randn(batch_size, 512).cuda(), shape, noise_mode='const')
+            r_color = raycast_handler.raycast_sdf(batch['x'], batch['y'],
+                                                                      batch['view'], batch['intrinsic'])
+            r_color = r_color.permute((0, 3, 1, 2)).cpu()
+            r_color = r_color.permute((0, 2, 3, 1))
+            r_color = (r_color + 1) / 2
+            for i in range(r_color.shape[0]):
+                color_i = r_color[i].numpy()
+                color_i[color_i == -float('inf')] = 1
+                color_i = color_i * 255
+                Image.fromarray(color_i.astype(np.uint8)).save(f"runs/images_sdf/render_{batch_idx * 8 + i}.jpg")
 
 
 if __name__ == '__main__':
@@ -259,3 +294,4 @@ if __name__ == '__main__':
     # test_uv_ours_dataloader()
     # test_compcars_together()
     # test_pigan_dataloader()
+    # test_grid_cars_dataloader()

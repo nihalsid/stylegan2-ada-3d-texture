@@ -127,24 +127,16 @@ class StyleGAN2Trainer(pl.LightningModule):
         step(d_opt, self.D)
         self.log("rGP", gp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
 
-    def render(self, color_grid, batch, use_bg_color=True):
-        r_color, _, _ = self.R.raycast_sdf(batch['x_dense'], batch['sparse_data'][0], batch['sparse_data'][1],
+    def render(self, color_grid, batch):
+        r_color = self.R.raycast_sdf(batch['x_dense'], batch['sparse_data'][0], batch['sparse_data'][1],
                                            color_grid.contiguous(), batch['view'], batch['intrinsic'])
-        if not use_bg_color:
-            r_color[r_color == -float('inf')] = 1
-        else:
-            for batch_idx in range(r_color.shape[0]):
-                r_color[batch_idx][r_color[batch_idx] == -float('inf')] = batch['bg'][batch_idx]
         return r_color.permute((0, 3, 1, 2))
 
-    def get_real(self, batch, use_bg_color=True):
+    def get_real(self, batch):
         if random.random() <= self.p_synthetic:
-            return self.render(batch['sparse_data'][2], batch, use_bg_color)
+            return self.render(batch['sparse_data'][2], batch)
         else:
-            if use_bg_color:
-                return batch['real'] * batch['mask'].expand(-1, 3, -1, -1) + (1 - batch['mask']).expand(-1, 3, -1, -1) * batch['bg'][:, None, None, None]
-            else:
-                return batch['real']
+            return batch['real']
 
     def training_step(self, batch, batch_idx):
         self.set_shape_codes(batch)
@@ -191,9 +183,9 @@ class StyleGAN2Trainer(pl.LightningModule):
                 batch = to_device(batch, self.device)
                 self.set_shape_codes(batch)
                 shape = batch['shape']
-                real_render = self.get_real(batch, use_bg_color=False).cpu()
+                real_render = self.get_real(batch).cpu()
                 fake_render = self.render(self.G(latents[iter_idx % len(latents)].to(self.device), batch['sparse_data_064'][0].long(),
-                                                 batch['sparse_data'][0].long(), shape, noise_mode='const'), batch, use_bg_color=False).cpu()
+                                                 batch['sparse_data'][0].long(), shape, noise_mode='const'), batch).cpu()
                 save_image(real_render, odir_samples / f"real_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 save_image(fake_render, odir_samples / f"fake_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 for batch_idx in range(real_render.shape[0]):
@@ -242,7 +234,7 @@ class StyleGAN2Trainer(pl.LightningModule):
             eval_batch = to_device(next(grid_loader), self.device)
             self.set_shape_codes(eval_batch)
             fake_grid = self.G(z, eval_batch['sparse_data_064'][0].long(), eval_batch['sparse_data'][0].long(), eval_batch['shape'], noise_mode='const')
-            fake = self.render(fake_grid, eval_batch, use_bg_color=False).cpu()
+            fake = self.render(fake_grid, eval_batch).cpu()
             if output_dir_fid is not None:
                 for batch_idx in range(fake.shape[0]):
                     save_image(fake[batch_idx], output_dir_fid / f"{iter_idx}_{batch_idx}.jpg", value_range=(-1, 1), normalize=True)
@@ -279,6 +271,7 @@ def step(opt, module):
     for param in module.parameters():
         if param.grad is not None:
             torch.nan_to_num(param.grad, nan=0, posinf=1e5, neginf=-1e5, out=param.grad)
+    torch.nn.utils.clip_grad_norm_(module.parameters(), 1)
     opt.step()
 
 

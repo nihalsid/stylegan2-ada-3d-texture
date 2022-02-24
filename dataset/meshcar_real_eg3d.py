@@ -1,12 +1,11 @@
-import json
 import os
 import random
 import math
-from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 import torch
+import torch_scatter
 from PIL import Image
 import torchvision.transforms as T
 import trimesh
@@ -15,6 +14,7 @@ from torchvision.transforms import InterpolationMode
 from tqdm import tqdm
 
 from util.camera import spherical_coord_to_cam
+from util.misc import EasyDict
 
 
 class FaceGraphMeshDataset(torch.utils.data.Dataset):
@@ -25,8 +25,6 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.image_size = config.image_size
         self.random_views = config.random_views
         self.camera_noise = config.camera_noise
-        self.uv_directory = Path(config.uv_path)
-        self.silhoutte_directory = Path(config.silhoutte_path)
         self.real_images = {x.name.split('.')[0]: x for x in Path(config.image_path).iterdir() if x.name.endswith('.jpg') or x.name.endswith('.png')}
         self.masks = {x: Path(config.mask_path) / self.real_images[x].name for x in self.real_images}
         self.erode = config.erode
@@ -38,10 +36,23 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
                 self.items = self.items * config.epoch_steps
             else:
                 self.items = self.items * limit_dataset_size
-        self.items = [x for x in self.items if (self.uv_directory / f'{x}.npy').exists()]
+        self.items = [x for x in self.items if (self.mesh_directory / x / "064.npy").exists()]
         self.target_name = "model_normalized.obj"
-        self.views_per_sample = config.views_per_sample
+        self.views_per_sample = 1
         self.color_generator = random_color if config.random_bg == 'color' else (random_grayscale if config.random_bg == 'grayscale' else white)
+        self.input_feature_extractor, self.num_feats = {
+            "normal": (self.input_normal, 3),
+            "position": (self.input_position, 3),
+            "position+normal": (self.input_position_normal, 6),
+            "normal+laplacian": (self.input_normal_laplacian, 6),
+            "normal+ff1+ff2": (self.input_normal_ff1_ff2, 15),
+            "ff2": (self.input_ff2, 8),
+            "curvature": (self.input_curvature, 2),
+            "laplacian": (self.input_laplacian, 3),
+            "normal+curvature": (self.input_normal_curvature, 5),
+            "normal+laplacian+ff1+ff2+curvature": (self.input_normal_laplacian_ff1_ff2_curvature, 20),
+            "semantics": (self.input_semantics, 7),
+        }[config.features]
         self.real_images_preloaded, self.masks_preloaded = {}, {}
         if config.preload:
             self.preload_real_images()
@@ -52,11 +63,21 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         selected_item = self.items[idx]
         pt_arxiv = torch.load(os.path.join(self.dataset_directory, f'{selected_item}.pt'))
+        sdf_grid = torch.from_numpy(np.load(self.mesh_directory / selected_item / "064.npy")).unsqueeze(0) - (0.03125 / 2)
         vertices = pt_arxiv['vertices'].float()
         indices = pt_arxiv['indices'].int()
-        uv = torch.from_numpy(np.load(str(Path(self.uv_directory, f'{selected_item}.npy')))).float()
-        silhoutte = Image.open(self.silhoutte_directory / f'{selected_item}.jpg').resize((self.image_size * 3, self.image_size * 2), resample=Image.NEAREST)
-        silhoutte = split_into_six(np.array(silhoutte)[:, :, np.newaxis])
+        normals = pt_arxiv['normals'].float()
+        edge_index = pt_arxiv['conv_data'][0][0].long()
+        num_sub_vertices = [pt_arxiv['conv_data'][i][0].shape[0] for i in range(1, len(pt_arxiv['conv_data']))]
+        pad_sizes = [pt_arxiv['conv_data'][i][2].shape[0] for i in range(len(pt_arxiv['conv_data']))]
+        sub_edges = [pt_arxiv['conv_data'][i][0].long() for i in range(1, len(pt_arxiv['conv_data']))]
+        pool_maps = pt_arxiv['pool_locations']
+        lateral_maps = pt_arxiv['lateral_maps']
+        is_pad = [pt_arxiv['conv_data'][i][4].bool() for i in range(len(pt_arxiv['conv_data']))]
+        level_masks = [torch.zeros(pt_arxiv['conv_data'][i][0].shape[0]).long() for i in range(len(pt_arxiv['conv_data']))]
+
+        faces = pt_arxiv['pos_data'][0].float()
+
         # noinspection PyTypeChecker
         tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
         vctr = torch.tensor(list(range(vertices.shape[0]))).long()
@@ -64,12 +85,15 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         real_sample, real_mask, mvp, cam_positions = self.get_image_and_view()
         background = self.color_generator(self.views_per_sample)
 
-        silhoutte = torch.nn.functional.one_hot((torch.from_numpy(silhoutte) / 255.0 == 1).long()[:, :, :, 0], num_classes=2).permute((0, 3, 1, 2)).float()
         return {
             "name": selected_item,
+            "faces": faces,
+            "sdf_x": sdf_grid,
+            "x": self.input_feature_extractor(pt_arxiv),
+            "y": pt_arxiv['target_colors'].float() * 2,
             "vertex_ctr": vctr,
-            "uv_vertex_ctr": vertices.shape[0],
             "vertices": vertices,
+            "normals": normals,
             "indices_quad": indices,
             "mvp": mvp,
             "cam_position": cam_positions,
@@ -78,9 +102,25 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "bg": torch.cat([background, torch.ones([background.shape[0], 1, 1, 1])], dim=1),
             "indices": tri_indices,
             "ranges": torch.tensor([0, tri_indices.shape[0]]).int(),
-            "uv": uv,
-            "silhoutte": silhoutte,
+            "graph_data": self.get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, lateral_maps, is_pad, level_masks)
         }
+
+    @staticmethod
+    def get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, lateral_maps, is_pad, level_masks):
+        return EasyDict({
+            'face_neighborhood': edge_index,
+            'sub_neighborhoods': sub_edges,
+            'pads': pad_sizes,
+            'node_counts': num_sub_vertices,
+            'pool_maps': pool_maps,
+            'lateral_maps': lateral_maps,
+            'is_pad': is_pad,
+            'level_masks': level_masks
+        })
+
+    @staticmethod
+    def batch_mask(t, graph_data, idx, level=0):
+        return t[graph_data['level_masks'][level] == idx]
 
     def get_image_and_view(self):
         total_selections = len(self.real_images.keys()) // 8
@@ -127,9 +167,12 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         t_image = pad(torch.from_numpy(np.array(resize(Image.open(str(path)))).transpose((2, 0, 1))).float() / 127.5 - 1)
         return t_image.unsqueeze(0)
 
-    def export_mesh(self, name, vertex_colors, output_path):
+    def export_mesh(self, name, face_colors, output_path):
         try:
             mesh = trimesh.load(self.mesh_directory / name / self.target_name, process=False)
+            vertex_colors = torch.zeros(mesh.vertices.shape).to(face_colors.device)
+            torch_scatter.scatter_mean(face_colors.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 3),
+                                       torch.from_numpy(mesh.faces).to(face_colors.device).reshape(-1).long(), dim=0, out=vertex_colors)
             out_mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=vertex_colors.cpu().numpy(), process=False)
             out_mesh.export(output_path)
         except Exception as err:
@@ -156,29 +199,59 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         t_mask = pad(resize((eroded_mask > 128).float()))
         return t_mask.unsqueeze(0)
 
-    def load_pair_meta(self, pairmeta_path):
-        loaded_json = json.loads(Path(pairmeta_path).read_text())
-        ret_dict = defaultdict(list)
-        ret_views = []
-        for k in loaded_json.keys():
-            if self.meta_to_pair(loaded_json[k]) in self.real_images.keys():
-                ret_dict[loaded_json[k]['shape_id']].append(loaded_json[k])
-                ret_views.append(loaded_json[k])
-        return ret_dict, ret_views
-
     def preload_real_images(self):
         for ri in tqdm(self.real_images.keys(), desc='preload'):
             self.real_images_preloaded[ri] = self.process_real_image(self.real_images[ri])
             self.masks_preloaded[ri] = self.process_real_mask(self.masks[ri])
 
     @staticmethod
-    def meta_to_pair(c):
-        return f'shape{c["shape_id"]:05d}_rank{(c["rank"] - 1):02d}_pair{c["id"]}'
-
-    @staticmethod
     def get_color_bg_real(batch):
         real_sample = batch['real'] * batch['mask'].expand(-1, 3, -1, -1) + (1 - batch['mask']).expand(-1, 3, -1, -1) * batch['bg'][:, :3, :, :]
         return real_sample
+
+    @staticmethod
+    def input_position(pt_arxiv):
+        return pt_arxiv['input_positions']
+
+    @staticmethod
+    def input_normal(pt_arxiv):
+        return pt_arxiv['input_normals']
+
+    @staticmethod
+    def input_position_normal(pt_arxiv):
+        return torch.cat([pt_arxiv['input_positions'], pt_arxiv['input_normals']], dim=1)
+
+    @staticmethod
+    def input_normal_laplacian(pt_arxiv):
+        return torch.cat([pt_arxiv['input_normals'], pt_arxiv['input_laplacian']], dim=1)
+
+    def input_normal_ff1_ff2(self, pt_arxiv):
+        return torch.cat([pt_arxiv['input_normals'], self.normed_feat(pt_arxiv, 'input_ff1'), self.normed_feat(pt_arxiv, 'input_ff2')], dim=1)
+
+    def input_ff2(self, pt_arxiv):
+        return self.normed_feat(pt_arxiv, 'input_ff2')
+
+    def input_curvature(self, pt_arxiv):
+        return torch.cat([self.normed_feat(pt_arxiv, 'input_gcurv').unsqueeze(-1), self.normed_feat(pt_arxiv, 'input_mcurv').unsqueeze(-1)], dim=1)
+
+    @staticmethod
+    def input_laplacian(pt_arxiv):
+        return pt_arxiv['input_laplacian']
+
+    def input_normal_curvature(self, pt_arxiv):
+        return torch.cat([pt_arxiv['input_normals'], self.normed_feat(pt_arxiv, 'input_gcurv').unsqueeze(-1), self.normed_feat(pt_arxiv, 'input_mcurv').unsqueeze(-1)], dim=1)
+
+    def input_normal_laplacian_ff1_ff2_curvature(self, pt_arxiv):
+        return torch.cat([pt_arxiv['input_normals'], pt_arxiv['input_laplacian'], self.normed_feat(pt_arxiv, 'input_ff1'),
+                          self.normed_feat(pt_arxiv, 'input_ff2'), self.normed_feat(pt_arxiv, 'input_gcurv').unsqueeze(-1),
+                          self.normed_feat(pt_arxiv, 'input_mcurv').unsqueeze(-1)], dim=1)
+
+    @staticmethod
+    def input_semantics(pt_arxiv):
+        return torch.nn.functional.one_hot(pt_arxiv['semantics'].long(), num_classes=7).float()
+
+    def normed_feat(self, pt_arxiv, feat):
+        return (pt_arxiv[feat] - self.stats['mean'][feat]) / (self.stats['std'][feat] + 1e-7)
 
 
 def random_color(num_views):
@@ -201,31 +274,6 @@ def white(num_views):
     return torch.from_numpy(np.array([1, 1, 1]).reshape((1, 3, 1, 1))).expand(num_views, -1, -1, -1).float()
 
 
-def get_semi_random_views(num_views):
-    elevation_params = [1.407, 0.207, 0.785, 1.767]
-    azimuth = random.sample(np.arange(0, 2 * math.pi).tolist(), num_views)
-    elevation = [min(max(x, elevation_params[2]), elevation_params[3])
-                 for x in np.random.normal(loc=elevation_params[0], scale=elevation_params[1], size=num_views).tolist()]
-    return [{'azimuth': a, 'elevation': e} for a, e in zip(azimuth, elevation)]
-
-
-def get_random_views(num_views):
-    elevation_params = [1.407, 0.207, 0.785, 1.767]
-    azimuth = random.sample(np.arange(0, 2 * math.pi).tolist(), num_views)
-    elevation = np.random.uniform(low=elevation_params[2], high=elevation_params[3], size=num_views).tolist()
-    return [{'azimuth': a, 'elevation': e} for a, e in zip(azimuth, elevation)]
-
-
-def split_into_six(np_array):
-    h, w = np_array.shape[:2]
-    h_, w_ = h // 2, w // 3
-    split_array = []
-    for i in range(2):
-        for j in range(3):
-            split_array.append(np_array[i * h_: (i + 1) * h_, j * w_: (j + 1) * w_, :])
-    return np.stack(split_array)
-
-
 def get_car_views():
     # front, back, right, left, front_right, front_left, back_right, back_left
     azimuth = [3 * math.pi / 2, math.pi / 2,
@@ -245,4 +293,3 @@ def get_car_views():
                        -random.random() * math.pi / 32, -random.random() * math.pi / 32,
                        0, 0]
     return [{'azimuth': a + an, 'elevation': e + en, 'fov': 40} for a, an, e, en in zip(azimuth, azimuth_noise, elevation, elevation_noise)]
-

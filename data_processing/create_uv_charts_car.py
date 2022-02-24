@@ -30,6 +30,7 @@ def create_silhouttes(config):
         rendered_color_gt_texture = render_helper.render(batch['vertices'], batch['indices'],
                                                  to_vertex_colors_scatter(batch["y"][:, :3], batch),
                                                  batch["ranges"].cpu(), batch['bg']).permute((0, 3, 1, 2))[:, :3, :, :]
+
         rendered_color_gt_texture = ((rendered_color_gt_texture * 0.5 + 0.5) * 255).int()
         rendered_color_gt_pos = rendered_color_gt[:, :3, :, :]
         rendered_color_gt_mask = ((1 - rendered_color_gt[:, 3, :, :]) * 255).int()
@@ -55,7 +56,7 @@ def create_uv_mapping(proc, num_proc):
     mesh_path = Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/manifold_combined")
     map_path = Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_positions")
     mask_path = Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_mask")
-    output_path = Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_map")
+    output_path = Path("/cluster/gimli/ysiddiqui/CADTextures/CompCars/uv_map_first")
     output_path.mkdir(exist_ok=True)
     meshes = list(mesh_path.iterdir())
     meshes = [x for i, x in enumerate(meshes) if i % num_proc == proc]
@@ -71,7 +72,8 @@ def create_uv_mapping(proc, num_proc):
 
         all_normals = np.array([[0., 1., 0.], [0., -1., 0.], [0., 0., -1.], [1., 0., 0.], [0., 0., 1.], [-1., 0., 0.]], dtype=np.float32)
 
-        for mp_idx in range(uv_map.shape[0]):
+        map_indices = [5, 3, 2, 4, 0, 1]
+        for mp_idx in map_indices:
             all_pos = uv_map[mp_idx].reshape((-1, 3))
             max_i = uv_map[mp_idx].shape[0]
             max_j = uv_map[mp_idx].shape[1]
@@ -81,11 +83,12 @@ def create_uv_mapping(proc, num_proc):
             pixel_coordinates = np.stack([pixel_coordinates_i, pixel_coordinates_j], axis=-1).reshape((-1, 2))
             valid_pos = uv_mask[mp_idx].flatten() == 255
             pixel_coordinates = pixel_coordinates[valid_pos]
+
             kdtree = scipy.spatial.cKDTree(all_pos[valid_pos])
             dist, indices = kdtree.query(np.array(tmesh.vertices), k=1)
-            kdtree_normals = scipy.spatial.cKDTree(all_normals)
-            dist_norm, indices_norm = kdtree_normals.query(np.array(tmesh.vertex_normals), k=1)
-            dmask = indices_norm == mp_idx
+            dmask_0 = dist < 8e-3
+            dmask_1 = selected_mapping[:, 3] == float('inf')
+            dmask = np.logical_and(dmask_0, dmask_1)
             selected_mapping[dmask, 1:3] = pixel_coordinates[indices, :][dmask, :]
             selected_mapping[dmask, 0] = mp_idx
             selected_mapping[dmask, 3] = dist[dmask]
@@ -116,11 +119,11 @@ def render_with_uv(config):
 if __name__ == '__main__':
     import argparse
 
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument('-n', '--num_proc', default=1, type=int)
-    # parser.add_argument('-p', '--proc', default=0, type=int)
-    # args = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-n', '--num_proc', default=1, type=int)
+    parser.add_argument('-p', '--proc', default=0, type=int)
+    args = parser.parse_args()
 
     # create_silhouttes()
-    # create_uv_mapping(args.proc, args.num_proc)
-    render_with_uv()
+    create_uv_mapping(args.proc, args.num_proc)
+    # render_with_uv()

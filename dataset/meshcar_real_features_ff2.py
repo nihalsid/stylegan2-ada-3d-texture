@@ -139,7 +139,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             masks.append(self.get_real_mask(c_i))
             azimuth = c_v['azimuth'] + (random.random() - 0.5) * self.camera_noise
             elevation = c_v['elevation'] + (random.random() - 0.5) * self.camera_noise
-            perspective_cam = spherical_coord_to_cam(c_v['fov'], azimuth, elevation)
+            perspective_cam = spherical_coord_to_cam(c_v['fov'], azimuth, elevation, cam_dist=1.5)
             projection_matrix = torch.from_numpy(perspective_cam.projection_mat()).float()
             cam_position = torch.from_numpy(np.linalg.inv(perspective_cam.view_mat())[:3, 3]).float()
             view_matrix = torch.from_numpy(perspective_cam.view_mat()).float()

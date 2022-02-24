@@ -94,6 +94,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "cam_position": cam_positions,
             "real": real_sample,
             "mask": real_mask,
+            "max_vertex_id": pt_arxiv['vertices'].shape[0],
             "bg": torch.cat([background, torch.ones([background.shape[0], 1, 1, 1])], dim=1),
             "indices": tri_indices,
             "ranges": torch.tensor([0, tri_indices.shape[0]]).int(),

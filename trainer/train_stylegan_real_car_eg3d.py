@@ -1,5 +1,4 @@
 import math
-import random
 import shutil
 from pathlib import Path
 
@@ -11,14 +10,14 @@ from torch_ema import ExponentialMovingAverage
 from torchvision.utils import save_image
 from cleanfid import fid
 
-from dataset.mesh_real_features_patch_spool import FaceGraphMeshDataset
+from dataset.meshcar_real_eg3d import FaceGraphMeshDataset
 from dataset import to_vertex_colors_scatter, GraphDataLoader, to_device
 from model.augment import AugmentPipe
 from model.differentiable_renderer import DifferentiableRenderer
-from model.graph import GraphEncoder
-from model.graph_generator_u_spade2 import Generator
+from model.styleganvox import SDFEncoder
+from model.eg3d.generator import Generator
 from model.discriminator import Discriminator
-from model.loss import PathLengthPenalty, compute_gradient_penalty
+from model.loss import compute_gradient_penalty
 from trainer import create_trainer
 from util.timer import Timer
 
@@ -38,17 +37,13 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.config = config
         self.train_set = FaceGraphMeshDataset(config)
         self.val_set = FaceGraphMeshDataset(config, config.num_eval_images)
-        self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, 7, channel_base=config.g_channel_base, channel_max=config.g_channel_max)
+        self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.image_size, 96, c_dim=256)
         self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
-        self.patch_D = Discriminator(config.patch_size, 3 * config.views_per_sample * config.num_patch_per_view, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
-        self.E = GraphEncoder(self.train_set.num_feats)
         self.R = None
+        self.E = SDFEncoder(1)
         self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size, config.views_per_sample, config.colorspace)
-        # print_module_summary(self.G, (torch.zeros(self.config.batch_size, self.config.latent_dim), ))
-        # print_module_summary(self.D, (torch.zeros(self.config.batch_size, 3, config.image_size, config.image_size), ))
         self.grid_z = torch.randn(config.num_eval_images, self.config.latent_dim)
         self.automatic_optimization = False
-        self.path_length_penalty = PathLengthPenalty(0.01, 2)
         self.ema = None
 
     def configure_optimizers(self):
@@ -57,62 +52,34 @@ class StyleGAN2Trainer(pl.LightningModule):
             {'params': list(self.E.parameters()), 'lr': self.config.lr_e, 'eps': 1e-8, 'weight_decay': 1e-4}
         ])
         d_opt = torch.optim.Adam(self.D.parameters(), lr=self.config.lr_d, betas=(0.0, 0.99), eps=1e-8)
-        patch_d_opt = torch.optim.Adam(self.patch_D.parameters(), lr=self.config.lr_d, betas=(0.0, 0.99), eps=1e-8)
-        return g_opt, d_opt, patch_d_opt
+        return g_opt, d_opt
 
     def forward(self, batch, limit_batch_size=False):
         z = self.latent(limit_batch_size)
-        w = self.get_mapped_latent(z, 0.9)
-        fake = self.G.synthesis(batch['graph_data'], w, batch['shape'])
+        w = self.get_mapped_latent(z, batch['shape'], 0.9)
+        fake = self.G.synthesis(self.noise(batch['faces']), w, batch['shape_grid'])
         return fake, w
+
+    def noise(self, faces):
+        return faces + torch.randn_like(faces) * self.config.camera_noise
 
     def g_step(self, batch):
         g_opt = self.optimizers()[0]
         g_opt.zero_grad(set_to_none=True)
         fake, w = self.forward(batch)
-
-        fake_render = self.render(fake, batch)
-
-        d_input = torch.nn.functional.interpolate(fake_render[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
-        p_fake = self.D(self.augment_pipe(d_input))
+        p_fake = self.D(self.augment_pipe(self.render(fake, batch)))
         gen_loss = torch.nn.functional.softplus(-p_fake).mean()
-
-        d_patch_input = self.extract_patches_from_tensor(fake_render[:, :3, :, :], 1 - fake_render[:, 3, :, :], self.config.num_patch_per_view, self.config.patch_size)
-        d_patch_input = d_patch_input.reshape(batch['real'].shape[0] // self.config.views_per_sample, -1, self.config.patch_size, self.config.patch_size)
-        p_fake_patch = self.patch_D(d_patch_input)
-        gen_loss_patch = torch.nn.functional.softplus(-p_fake_patch).mean()
-
-        self.manual_backward(gen_loss + self.config.lambda_patch * gen_loss_patch)
+        self.manual_backward(gen_loss)
         log_gen_loss = gen_loss.item()
-        log_gen_loss_patch = gen_loss_patch.item()
-
         step(g_opt, self.G)
         self.log("G", log_gen_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True, sync_dist=True)
-        self.log("G_patch", log_gen_loss_patch, on_step=True, on_epoch=False, prog_bar=True, logger=True, sync_dist=True)
-
-    def g_regularizer(self, batch):
-        g_opt = self.optimizers()[0]
-        for idx in range(len(batch['shape'])):
-            batch['shape'][idx] = batch['shape'][idx].detach()
-        g_opt.zero_grad(set_to_none=True)
-        fake, w = self.forward(batch)
-        fake_render = self.render(fake, batch)
-        resized_fake_render = torch.nn.functional.interpolate(fake_render[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
-        plp = self.path_length_penalty(resized_fake_render, w)
-        if not torch.isnan(plp):
-            gen_loss = self.config.lambda_plp * plp * self.config.lazy_path_penalty_interval
-            self.log("rPLP", plp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
-            self.manual_backward(gen_loss)
-            step(g_opt, self.G)
 
     def d_step(self, batch):
         d_opt = self.optimizers()[1]
         d_opt.zero_grad(set_to_none=True)
 
         fake, _ = self.forward(batch)
-        fake_render = self.render(fake.detach(), batch)
-        d_input = torch.nn.functional.interpolate(fake_render[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
-        p_fake = self.D(self.augment_pipe(d_input))
+        p_fake = self.D(self.augment_pipe(self.render(fake.detach(), batch)))
         fake_loss = torch.nn.functional.softplus(p_fake).mean()
         self.manual_backward(fake_loss)
 
@@ -130,37 +97,6 @@ class StyleGAN2Trainer(pl.LightningModule):
         disc_loss = real_loss + fake_loss
         self.log("D", disc_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True, sync_dist=True)
 
-    def patch_d_step(self, batch):
-        d_opt = self.optimizers()[2]
-        d_opt.zero_grad(set_to_none=True)
-
-        fake, _ = self.forward(batch)
-        fake_render = self.render(fake.detach(), batch)
-        d_patch_input = self.extract_patches_from_tensor(fake_render[:, :3, :, :], 1 - fake_render[:, 3, :, :], self.config.num_patch_per_view, self.config.patch_size)
-        d_patch_input = d_patch_input.reshape(batch['real'].shape[0] // self.config.views_per_sample, -1, self.config.patch_size, self.config.patch_size)
-
-        p_fake = self.patch_D(d_patch_input)
-        fake_loss = torch.nn.functional.softplus(p_fake).mean()
-        self.manual_backward(fake_loss)
-
-        real = self.train_set.get_color_bg_real_hres(batch)
-        first_views = list(range(0, real.shape[0], self.config.views_per_sample))
-        real_patch = self.extract_patches_from_tensor(real[first_views], batch['mask_hres'][first_views, 0, :, :], self.config.num_patch_per_view * self.config.views_per_sample, self.config.patch_size)
-        real_patch = real_patch.reshape(real.shape[0] // self.config.views_per_sample, -1, self.config.patch_size, self.config.patch_size)
-
-        p_real = self.patch_D(real_patch)
-
-        # Get discriminator loss
-        real_loss = torch.nn.functional.softplus(-p_real).mean()
-        self.manual_backward(real_loss)
-
-        step(d_opt, self.patch_D)
-
-        self.log("patch_D_real", real_loss, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
-        self.log("patch_D_fake", fake_loss, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
-        disc_loss = real_loss + fake_loss
-        self.log("patch_D", disc_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True, sync_dist=True)
-
     def d_regularizer(self, batch):
         d_opt = self.optimizers()[1]
         d_opt.zero_grad(set_to_none=True)
@@ -173,21 +109,6 @@ class StyleGAN2Trainer(pl.LightningModule):
         step(d_opt, self.D)
         self.log("rGP", gp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
 
-    def patch_d_regularizer(self, batch):
-        d_opt = self.optimizers()[2]
-        d_opt.zero_grad(set_to_none=True)
-        image = self.train_set.get_color_bg_real_hres(batch)
-        image.requires_grad_()
-        first_views = list(range(0, image.shape[0], self.config.views_per_sample))
-        patch = self.extract_patches_from_tensor(image[first_views], batch['mask_hres'][first_views, 0, :, :], self.config.num_patch_per_view * self.config.views_per_sample, self.config.patch_size)
-        real_patch = patch.reshape(image.shape[0] // self.config.views_per_sample, -1, self.config.patch_size, self.config.patch_size)
-        p_real = self.patch_D(real_patch)
-        gp = compute_gradient_penalty(image, p_real)
-        disc_loss = self.config.lambda_gp * gp * self.config.lazy_gradient_penalty_interval
-        self.manual_backward(disc_loss)
-        step(d_opt, self.patch_D)
-        self.log("patch_rGP", gp, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
-
     def render(self, face_colors, batch, use_bg_color=True):
         rendered_color = self.R.render(batch['vertices'], batch['indices'], to_vertex_colors_scatter(face_colors, batch), batch["ranges"].cpu(), batch['bg'] if use_bg_color else None)
         return rendered_color.permute((0, 3, 1, 2))
@@ -197,9 +118,6 @@ class StyleGAN2Trainer(pl.LightningModule):
         # optimize generator
         self.g_step(batch)
 
-        if self.global_step > self.config.lazy_path_penalty_after and (self.global_step + 1) % self.config.lazy_path_penalty_interval == 0:
-            self.g_regularizer(batch)
-
         # torch.nn.utils.clip_grad_norm_(self.G.parameters(), max_norm=1.0)
 
         self.ema.update(self.G.parameters())
@@ -207,11 +125,9 @@ class StyleGAN2Trainer(pl.LightningModule):
         # optimize discriminator
 
         self.d_step(batch)
-        self.patch_d_step(batch)
 
         if (self.global_step + 1) % self.config.lazy_gradient_penalty_interval == 0:
             self.d_regularizer(batch)
-            self.patch_d_regularizer(batch)
 
         self.execute_ada_heuristics()
 
@@ -239,12 +155,8 @@ class StyleGAN2Trainer(pl.LightningModule):
             for iter_idx, batch in enumerate(self.val_dataloader()):
                 batch = to_device(batch, self.device)
                 self.set_shape_codes(batch)
-                shape = batch['shape']
                 real_render = batch['real'].cpu()
-                fake_render = self.render(self.G(batch['graph_data'], latents[iter_idx % len(latents)].to(self.device), shape, noise_mode='const'), batch, use_bg_color=False)
-                fake_render = torch.nn.functional.interpolate(fake_render[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False).cpu()
-                real_render = self.train_set.cspace_convert_back(real_render)
-                fake_render = self.train_set.cspace_convert_back(fake_render)
+                fake_render = self.render(self.G(batch['faces'], latents[iter_idx % len(latents)].to(self.device), batch['shape'], batch['shape_grid'], noise_mode='const'), batch, use_bg_color=False).cpu()
                 save_image(real_render, odir_samples / f"real_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 save_image(fake_render, odir_samples / f"fake_{iter_idx}.jpg", value_range=(-1, 1), normalize=True)
                 for batch_idx in range(real_render.shape[0]):
@@ -258,14 +170,14 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.log(f"kid", kid_score, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True, sync_dist=True)
         shutil.rmtree(odir_real.parent)
 
-    def get_mapped_latent(self, z, style_mixing_prob):
+    def get_mapped_latent(self, z, shape, style_mixing_prob):
         if torch.rand(()).item() < style_mixing_prob:
             cross_over_point = int(torch.rand(()).item() * self.G.mapping.num_ws)
-            w1 = self.G.mapping(z[0])[:, :cross_over_point, :]
-            w2 = self.G.mapping(z[1], skip_w_avg_update=True)[:, cross_over_point:, :]
+            w1 = self.G.mapping(z[0], c=shape)[:, :cross_over_point, :]
+            w2 = self.G.mapping(z[1], c=shape, skip_w_avg_update=True)[:, cross_over_point:, :]
             return torch.cat((w1, w2), dim=1)
         else:
-            w = self.G.mapping(z[0])
+            w = self.G.mapping(z[0], c=shape)
             return w
 
     def latent(self, limit_batch_size=False):
@@ -273,10 +185,6 @@ class StyleGAN2Trainer(pl.LightningModule):
         z1 = torch.randn(batch_size, self.config.latent_dim).to(self.device)
         z2 = torch.randn(batch_size, self.config.latent_dim).to(self.device)
         return z1, z2
-
-    def set_shape_codes(self, batch):
-        code = self.E(batch['x'], batch['graph_data'])
-        batch['shape'] = code
 
     def train_dataloader(self):
         return GraphDataLoader(self.train_set, self.config.batch_size, shuffle=True, pin_memory=True, drop_last=True, num_workers=self.config.num_workers)
@@ -291,9 +199,7 @@ class StyleGAN2Trainer(pl.LightningModule):
             z = z.to(self.device)
             eval_batch = to_device(next(grid_loader), self.device)
             self.set_shape_codes(eval_batch)
-            fake = self.render(self.G(eval_batch['graph_data'], z, eval_batch['shape'], noise_mode='const'), eval_batch, use_bg_color=False)
-            fake = torch.nn.functional.interpolate(fake[:, :3, :, :], size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False).cpu()
-            fake = self.train_set.cspace_convert_back(fake)
+            fake = self.render(self.G(eval_batch['faces'], z, eval_batch['shape'], eval_batch['shape_grid'], noise_mode='const'), eval_batch, use_bg_color=False).cpu()
             if output_dir_fid is not None:
                 for batch_idx in range(fake.shape[0]):
                     save_image(fake[batch_idx], output_dir_fid / f"{iter_idx}_{batch_idx}.jpg", value_range=(-1, 1), normalize=True)
@@ -310,8 +216,8 @@ class StyleGAN2Trainer(pl.LightningModule):
                 z = z.to(self.device)
                 eval_batch = to_device(next(grid_loader), self.device)
                 self.set_shape_codes(eval_batch)
-                generated_colors = torch.clamp(self.G(eval_batch['graph_data'], z, eval_batch['shape'], noise_mode='const'), -1, 1)
-                generated_colors = self.train_set.cspace_convert_back(generated_colors) * 0.5 + 0.5
+                generated_colors = torch.clamp(self.G(eval_batch['faces'], z, eval_batch['shape'], eval_batch['shape_grid'], noise_mode='const'), -1, 1)
+                generated_colors = generated_colors * 0.5 + 0.5
                 for bidx in range(generated_colors.shape[0] // self.config.num_faces[0]):
                     self.train_set.export_mesh(eval_batch['name'][bidx],
                                                generated_colors[self.config.num_faces[0] * bidx: self.config.num_faces[0] * (bidx + 1)], outdir / f"{eval_batch['name'][bidx]}.obj")
@@ -326,40 +232,22 @@ class StyleGAN2Trainer(pl.LightningModule):
             odir.mkdir(exist_ok=True, parents=True)
         return output_dir_fid_real, output_dir_fid_fake, output_dir_samples, output_dir_textures, output_dir_meshes
 
+    def set_shape_codes(self, batch):
+        code = self.E(batch['sdf_x'])
+        batch['shape'] = code[4].mean((2, 3, 4))
+        batch['shape_grid'] = code[3]
+
     def on_train_start(self):
         if self.ema is None:
             self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
         if self.R is None:
-            self.R = DifferentiableRenderer(self.config.image_size_hres, "bounds", self.config.colorspace, num_channels=4)
+            self.R = DifferentiableRenderer(self.config.image_size, "bounds", self.config.colorspace)
 
     def on_validation_start(self):
         if self.ema is None:
             self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
         if self.R is None:
-            self.R = DifferentiableRenderer(self.config.image_size_hres, "bounds", self.config.colorspace, num_channels=4)
-
-    @staticmethod
-    def extract_patches_from_tensor(t_image, mask, patches_per_view, patch_size):
-        patches = []
-        for idx in range(t_image.shape[0]):
-            nonzero_y, nonzero_x = torch.nonzero(mask[idx] > 0, as_tuple=True)
-            y_min, y_max = nonzero_y.min(), nonzero_y.max()
-            x_min, x_max = nonzero_x.min(), nonzero_x.max()
-            nz_m0 = torch.logical_and(nonzero_y > (y_min + patch_size // 2 + 1), nonzero_y < (y_max - patch_size // 2 - 1))
-            nz_m1 = torch.logical_and(nonzero_x > (x_min + patch_size // 2 + 1), nonzero_x < (x_max - patch_size // 2 - 1))
-            nz_mask = torch.logical_and(nz_m0, nz_m1)
-            nonzero_y = nonzero_y[nz_mask]
-            nonzero_x = nonzero_x[nz_mask]
-            sampled_idx = random.sample(list(range(nonzero_y.shape[0])), patches_per_view)
-            y = nonzero_y[sampled_idx]
-            x = nonzero_x[sampled_idx]
-            for p in range(patches_per_view):
-                y_low, y_high = y[p] - patch_size // 2, y[p] + patch_size // 2
-                x_low, x_high = x[p] - patch_size // 2, x[p] + patch_size // 2
-                patch = t_image[idx, :, y_low: y_high, x_low: x_high]
-                patches.append(patch.unsqueeze(0))
-        patches = torch.cat(patches, dim=0).reshape((t_image.shape[0], patches_per_view, 3, patch_size, patch_size))
-        return patches
+            self.R = DifferentiableRenderer(self.config.image_size, "bounds", self.config.colorspace)
 
 
 def step(opt, module):
@@ -370,9 +258,9 @@ def step(opt, module):
     opt.step()
 
 
-@hydra.main(config_path='../config', config_name='stylegan2')
+@hydra.main(config_path='../config', config_name='stylegan2_car')
 def main(config):
-    trainer = create_trainer("StyleGAN23D", config)
+    trainer = create_trainer("StyleGAN23D-CompCars", config)
     model = StyleGAN2Trainer(config)
     trainer.fit(model)
 

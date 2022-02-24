@@ -110,3 +110,11 @@ class DifferentiableRenderer(nn.Module):
             resolution = self.resolution
         color = self.render_func(self.glctx, vertex_positions, triface_indices, vertex_colors, triface_indices, resolution, ranges, self.color_space, background)
         return color[:, :, :, :self.num_channels]
+
+    def get_visible_triangles(self, vertex_positions, triface_indices, ranges=None, resolution=None):
+        if ranges is None:
+            ranges = torch.tensor([[0, triface_indices.shape[0]]]).int()
+        if resolution is None:
+            resolution = self.resolution
+        rast, _ = dr.rasterize(self.glctx, vertex_positions, triface_indices, resolution=[resolution, resolution], ranges=ranges)
+        return rast[..., 3]

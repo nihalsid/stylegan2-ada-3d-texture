@@ -223,6 +223,7 @@ def step(opt, module):
     for param in module.parameters():
         if param.grad is not None:
             torch.nan_to_num(param.grad, nan=0, posinf=1e5, neginf=-1e5, out=param.grad)
+    torch.nn.utils.clip_grad_norm_(module.parameters(), 1)
     opt.step()
 
 
