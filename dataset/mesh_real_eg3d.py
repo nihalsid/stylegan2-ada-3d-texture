@@ -56,7 +56,6 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             "normal+laplacian+ff1+ff2+curvature": (self.input_normal_laplacian_ff1_ff2_curvature, 20),
             "semantics": (self.input_semantics, 7),
         }[config.features]
-        self.stats = torch.load(config.stat_path)
         self.pair_meta, self.all_views = self.load_pair_meta(config.pairmeta_path)
         self.real_images_preloaded, self.masks_preloaded = {}, {}
         if config.preload:

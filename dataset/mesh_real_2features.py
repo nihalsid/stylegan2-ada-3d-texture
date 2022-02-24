@@ -45,7 +45,6 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         self.input_feature_extractor_0 = self.input_normal
         self.input_feature_extractor_1 = self.input_semantics
         self.num_feats_0, self.num_feats_1 = 3, 7
-        self.stats = torch.load(config.stat_path)
         self.pair_meta, self.all_views = self.load_pair_meta(config.pairmeta_path)
         self.real_images_preloaded, self.masks_preloaded = {}, {}
         if config.preload:
