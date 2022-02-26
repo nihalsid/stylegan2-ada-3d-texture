@@ -6,14 +6,14 @@ from model.graph import create_faceconv_input, SmoothUpsample, modulated_face_co
 
 class Generator(torch.nn.Module):
 
-    def __init__(self, z_dim, w_dim, w_num_layers, num_faces, color_channels, c_dim=0, channel_base=16384, channel_max=512):
+    def __init__(self, z_dim, w_dim, w_num_layers, num_faces, color_channels, e_layer_dims, c_dim=0, channel_base=16384, channel_max=512):
         super().__init__()
         self.z_dim = z_dim
         self.w_dim = w_dim
         self.c_dim = c_dim
         self.num_faces = num_faces
         self.color_channels = color_channels
-        self.synthesis = SynthesisNetwork(w_dim=w_dim, num_faces=num_faces, color_channels=color_channels, channel_base=channel_base, channel_max=channel_max)
+        self.synthesis = SynthesisNetwork(w_dim=w_dim, num_faces=num_faces, color_channels=color_channels, e_layer_dims=e_layer_dims, channel_base=channel_base, channel_max=channel_max)
         self.num_ws = self.synthesis.num_ws
         self.mapping = MappingNetwork(z_dim=z_dim, w_dim=w_dim, c_dim=c_dim, num_ws=self.num_ws, num_layers=w_num_layers)
 
@@ -25,14 +25,14 @@ class Generator(torch.nn.Module):
 
 class SynthesisNetwork(torch.nn.Module):
 
-    def __init__(self, w_dim, num_faces, color_channels, channel_base=16384, channel_max=512):
+    def __init__(self, w_dim, num_faces, color_channels, e_layer_dims, channel_base=16384, channel_max=512):
         super().__init__()
         self.w_dim = w_dim
         self.num_faces = num_faces
         self.color_channels = color_channels
         self.block_pow_2 = [2 ** i for i in range(2, len(self.num_faces) + 2)]
         channels_dict = {res: min(channel_base // res, channel_max) for res in self.block_pow_2}
-        channels_dict_geo = {4: 256, 8: 256, 16: 128, 32: 128, 64: 128, 128: 64}
+        channels_dict_geo = {4: e_layer_dims[-1], 8: e_layer_dims[-2], 16: e_layer_dims[-3], 32: e_layer_dims[-4], 64: e_layer_dims[-5], 128: e_layer_dims[-6]}
         self.blocks = torch.nn.ModuleList()
         block_level = len(self.block_pow_2) - 1
         self.num_ws = 2 * (len(self.block_pow_2) + 1)

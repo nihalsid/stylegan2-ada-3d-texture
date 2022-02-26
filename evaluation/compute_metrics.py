@@ -1,16 +1,16 @@
-from collections import OrderedDict
 from pathlib import Path
 
 import torch
+from util.misc import compute_fid
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
 from tqdm import tqdm
-from cleanfid import fid
 
 from dataset import GraphDataLoader, to_device, to_vertex_colors_scatter
 from model.differentiable_renderer import DifferentiableRenderer
 import hydra
 
+from util.misc import get_parameters_from_state_dict
 
 OUTPUT_DIR = Path("/cluster_HDD/gondor/ysiddiqui/surface_gan_eval/photoshape")
 REAL_DIR = Path("/cluster_HDD/gondor/ysiddiqui/surface_gan_eval/photoshape/real")
@@ -142,22 +142,6 @@ def render_faces(R, face_colors, batch, render_size, image_size):
     return ret_val
 
 
-def get_parameters_from_state_dict(state_dict, filter_key):
-    new_state_dict = OrderedDict()
-    for k in state_dict:
-        if k.startswith(filter_key):
-            new_state_dict[".".join(k.split(".")[1:])] = state_dict[k]
-    return new_state_dict
-
-
-def compute_fid(output_dir_fake, output_dir_real, filepath, device):
-    fid_score = fid.compute_fid(str(output_dir_real), str(output_dir_fake), device=device, dataset_res=256, num_workers=0)
-    print(f'FID: {fid_score:.3f}')
-    kid_score = fid.compute_kid(str(output_dir_real), str(output_dir_fake), device=device, dataset_res=256, num_workers=0)
-    print(f'KID: {kid_score:.3f}')
-    Path(filepath).write_text(f"fid = {fid_score}\nkid = {kid_score}")
-
-
 @hydra.main(config_path='../config', config_name='stylegan2')
 def create_real(config):
     from PIL import Image
@@ -210,6 +194,98 @@ def evaluate_uv_parameterized_gan(config):
             for batch_idx in range(fake_render.shape[0]):
                 save_image(fake_render[batch_idx], OUTPUT_DIR_UV / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
     compute_fid(OUTPUT_DIR_UV, REAL_DIR, OUTPUT_DIR_UV.parent / f"score_uv_{config.views_per_sample}_{num_latent}.txt", device)
+
+
+# UV Parameterization - Norm Aligned
+@hydra.main(config_path='../config', config_name='stylegan2')
+def evaluate_uv_normalign_parameterized_gan(config):
+    config.views_per_sample = 4
+    config.image_size = 128
+    config.render_size = 512
+    num_latent = 1
+
+    from model.stylegan2.generator import Generator
+    from dataset.mesh_real_features_uv import FaceGraphMeshDataset
+    OUTPUT_DIR_UV = OUTPUT_DIR / f"uv_na_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_UV.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/22021749_StyleGAN23D_uv_normaligned_silhoutte_256/checkpoints/_epoch=79.ckpt"
+    CHECKPOINT_EMA = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/22021749_StyleGAN23D_uv_normaligned_silhoutte_256/checkpoints/ema_000203839.pth"
+
+    def render(r_texture_atlas, r_batch):
+        r_texture_atlas = r_texture_atlas.reshape((-1, r_texture_atlas.shape[2], r_texture_atlas.shape[3], r_texture_atlas.shape[4]))
+        vertices_mapped = r_texture_atlas[r_batch["uv"][:, 0].long(), :, (r_batch["uv"][:, 1] * config.image_size).long(), (r_batch["uv"][:, 2] * config.image_size).long()]
+        vertices_mapped = torch.cat([vertices_mapped, torch.ones((vertices_mapped.shape[0], 1), device=vertices_mapped.device)], dim=-1)
+        rendered_color = R.render(r_batch['vertices'], r_batch['indices'], vertices_mapped, r_batch["ranges"].cpu(), resolution=config.render_size).permute((0, 3, 1, 2))
+        rendered_color = torch.nn.functional.interpolate(rendered_color, (256, 256), mode='bilinear', align_corners=True)
+        return rendered_color
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, shuffle=False, drop_last=True, num_workers=0)
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.image_size, 3).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
+    G.load_state_dict(get_parameters_from_state_dict(torch.load(CHECKPOINT, map_location=device)["state_dict"], "G"))
+    G.eval()
+    ema = torch.load(CHECKPOINT_EMA, map_location=device)
+    ema.copy_to([p for p in G.parameters() if p.requires_grad])
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        eval_batch = to_device(batch, device)
+        silhoutte = eval_batch['silhoutte'].reshape([config.batch_size * 6, 2, config.image_size, config.image_size])
+        for z_idx in range(num_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            atlas = G(z, silhoutte, noise_mode='const')
+            fake_render = render(atlas, eval_batch).cpu()
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_UV / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
+    compute_fid(OUTPUT_DIR_UV, REAL_DIR, OUTPUT_DIR_UV.parent / f"score_uv_na_{config.views_per_sample}_{num_latent}.txt", device)
+
+
+# UV Parameterization - Ours
+@hydra.main(config_path='../config', config_name='stylegan2')
+def evaluate_uv_ours_parameterized_gan(config):
+    config.views_per_sample = 4
+    config.image_size = 256
+    config.render_size = 512
+    num_latent = 1
+
+    from model.uv.generator import Generator, NormalEncoder
+    from dataset.mesh_real_features_uv_ours import FaceGraphMeshDataset, split_tensor_into_six
+    OUTPUT_DIR_UV = OUTPUT_DIR / f"uv_ours_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_UV.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/22021749_StyleGAN23D_uv_ours_silhoutte_256/checkpoints/_epoch=59.ckpt"
+    CHECKPOINT_EMA = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/22021749_StyleGAN23D_uv_ours_silhoutte_256/checkpoints/ema_000152879.pth"
+
+    def render(r_texture_atlas, r_batch):
+        r_texture_atlas = split_tensor_into_six(r_texture_atlas)
+        vertices_mapped = r_texture_atlas[r_batch["uv"][:, 0].long(), :, (r_batch["uv"][:, 1] * (config.image_size // 2)).long(), (r_batch["uv"][:, 2] * (config.image_size // 3)).long()]
+        vertices_mapped = torch.cat([vertices_mapped, torch.ones((vertices_mapped.shape[0], 1), device=vertices_mapped.device)], dim=-1)
+        rendered_color = R.render(r_batch['vertices'], r_batch['indices'], vertices_mapped, r_batch["ranges"].cpu())
+        rendered_color = torch.nn.functional.interpolate(rendered_color.permute((0, 3, 1, 2)), (256, 256), mode='bilinear', align_corners=True)
+        return rendered_color
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, shuffle=False, drop_last=True, num_workers=0)
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.image_size, 3).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
+    E = NormalEncoder(3).to(device)
+    state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
+    G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
+    G.eval()
+    E.eval()
+    ema = torch.load(CHECKPOINT_EMA, map_location=device)
+    ema.copy_to([p for p in G.parameters() if p.requires_grad])
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        eval_batch = to_device(batch, device)
+        code = E(eval_batch['uv_normals'])
+        for z_idx in range(num_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            atlas = G(z, code, noise_mode='const')
+            fake_render = render(atlas, eval_batch).cpu()
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_UV / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
+    compute_fid(OUTPUT_DIR_UV, REAL_DIR, OUTPUT_DIR_UV.parent / f"score_uv_ours_{config.views_per_sample}_{num_latent}.txt", device)
 
 
 # 3D Grid Parameterization
@@ -329,9 +405,9 @@ def evaluate_triplane_gan(config):
     config.batch_size = 1
     config.views_per_sample = 4
     config.image_size = 256
-    config.render_size = 256
+    config.render_size = 512
     config.num_mapping_layers = 8
-    num_latent = 4
+    num_latent = 1
 
     OUTPUT_DIR_EG3D = OUTPUT_DIR / f"eg3d_{config.views_per_sample}_{num_latent}"
     OUTPUT_DIR_EG3D.mkdir(exist_ok=True, parents=True)
@@ -421,14 +497,14 @@ def evaluate_our_gan(config):
     config.batch_size = 1
     config.views_per_sample = 4
     config.image_size = 256
-    config.render_size = 1024
+    config.render_size = 512
     config.num_mapping_layers = 5
     config.g_channel_base = 32768
     config.g_channel_max = 768
 
     num_latent = 1
 
-    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ours_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ours_256-2_{config.views_per_sample}_{num_latent}"
     OUTPUT_DIR_OURS.mkdir(exist_ok=True, parents=True)
     CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/15021601_StyleGAN23D_fg3bgg-big-lrd1g14-v2m5-1K512/checkpoints/_epoch=119.ckpt"
     CHECKPOINT_EMA = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/15021601_StyleGAN23D_fg3bgg-big-lrd1g14-v2m5-1K512/checkpoints/ema_000076439.pth"
@@ -437,8 +513,8 @@ def evaluate_our_gan(config):
     eval_dataset = FaceGraphMeshDataset(config)
     eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
 
-    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
     E = TwinGraphEncoder(eval_dataset.num_feats, 1).to(device)
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, e_layer_dims=E.layer_dims, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
     R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
     state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
     G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
@@ -458,7 +534,7 @@ def evaluate_our_gan(config):
             for batch_idx in range(fake_render.shape[0]):
                 save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
 
-    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ours_{config.views_per_sample}_{num_latent}.txt", device)
+    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ours-256-2_{config.views_per_sample}_{num_latent}.txt", device)
 
 
 @hydra.main(config_path='../config', config_name='stylegan2')
@@ -505,6 +581,52 @@ def ablate_our_gan_no_feat(config):
                 save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
 
     compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ablate_no_feat_{config.views_per_sample}_{num_latent}.txt", device)
+
+
+@hydra.main(config_path='../config', config_name='stylegan2')
+def ablate_our_gan_6k(config):
+    from model.graph_generator_u_6k import Generator
+    from model.graph import GraphEncoder
+    from dataset.mesh_real_features import FaceGraphMeshDataset
+    config.batch_size = 1
+    config.views_per_sample = 4
+    config.image_size = 256
+    config.render_size = 512
+    config.num_mapping_layers = 5
+    config.g_channel_base = 32768
+    num_latent = 1
+
+    OUTPUT_DIR_OURS = OUTPUT_DIR / f"ablate_6k_{config.views_per_sample}_{num_latent}"
+    OUTPUT_DIR_OURS.mkdir(exist_ok=True, parents=True)
+    CHECKPOINT = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/22021833_StyleGAN23D_lowres6K-notwin-lrd1g14-v2m5-256/checkpoints/_epoch=44.ckpt"
+    CHECKPOINT_EMA = "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/22021833_StyleGAN23D_lowres6K-notwin-lrd1g14-v2m5-256/checkpoints/ema_000057329.pth"
+
+    device = torch.device("cuda:0")
+    eval_dataset = FaceGraphMeshDataset(config)
+    eval_loader = GraphDataLoader(eval_dataset, config.batch_size, drop_last=True, num_workers=config.num_workers)
+
+    G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max).to(device)
+    E = GraphEncoder(eval_dataset.num_feats).to(device)
+    R = DifferentiableRenderer(config.render_size, "bounds", config.colorspace)
+    state_dict = torch.load(CHECKPOINT, map_location=device)["state_dict"]
+    G.load_state_dict(get_parameters_from_state_dict(state_dict, "G"))
+    ema = torch.load(CHECKPOINT_EMA, map_location=device)
+    ema.copy_to([p for p in G.parameters() if p.requires_grad])
+    E.load_state_dict(get_parameters_from_state_dict(state_dict, "E"))
+    G.eval()
+    E.eval()
+
+    for iter_idx, batch in enumerate(tqdm(eval_loader)):
+        eval_batch = to_device(batch, device)
+        shape = E(batch['x'], batch['graph_data'])
+        for z_idx in range(num_latent):
+            z = torch.randn(config.batch_size, config.latent_dim).to(device)
+            fake = G(eval_batch['graph_data'], z, shape, noise_mode='const')
+            fake_render = render_faces(R, fake, eval_batch, config.render_size, config.image_size)
+            for batch_idx in range(fake_render.shape[0]):
+                save_image(fake_render[batch_idx], OUTPUT_DIR_OURS / f"{iter_idx}_{batch_idx}_{z_idx}.jpg", value_range=(-1, 1), normalize=True)
+
+    compute_fid(OUTPUT_DIR_OURS, REAL_DIR, OUTPUT_DIR_OURS.parent / f"score_ablate_6k_{config.views_per_sample}_{num_latent}.txt", device)
 
 
 @hydra.main(config_path='../config', config_name='stylegan2')
@@ -924,13 +1046,16 @@ def ablate_our_gan_normals(config):
 
 
 if __name__ == "__main__":
+    # ablate_our_gan_6k()
+    # evaluate_uv_ours_parameterized_gan()
     # create_real()
     # evaluate_uv_parameterized_gan()
     # evaluate_3d_parameterized_gan()
-    # evaluate_our_gan()
+    evaluate_our_gan()
     # evaluate_triplane_gan()
     # evaluate_texturefields_gan()
-    render_latent()
+    # render_latent()
+    # evaluate_uv_normalign_parameterized_gan()
     # render_mesh()
     # ablate_our_gan_1_view()
     # ablate_our_gan_no_feat()

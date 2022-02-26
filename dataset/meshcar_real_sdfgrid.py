@@ -105,16 +105,6 @@ class SDFGridDataset(torch.utils.data.Dataset):
         t_mask = pad(resize((eroded_mask > 128).float()))
         return t_mask.unsqueeze(0)
 
-    def get_image_selections(self, shape_id):
-        candidates = self.pair_meta[shape_id]
-        if len(candidates) < self.views_per_sample:
-            while len(candidates) < self.views_per_sample:
-                meta = self.pair_meta[random.choice(list(self.pair_meta.keys()))]
-                candidates.extend(meta[:self.views_per_sample - len(candidates)])
-        else:
-            candidates = random.sample(candidates, self.views_per_sample)
-        return candidates
-
     def process_real_image(self, path):
         pad_size = int(self.image_size * self.real_pad_factor)
         resize = T.Resize(size=(self.image_size - 2 * pad_size, self.image_size - 2 * pad_size), interpolation=InterpolationMode.BICUBIC)

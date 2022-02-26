@@ -33,7 +33,6 @@ class StyleGAN2Trainer(pl.LightningModule):
     def __init__(self, config):
         super().__init__()
         config.views_per_sample = 1
-        config.image_size = 128
         self.save_hyperparameters(config)
         self.config = config
         self.train_set = FaceGraphMeshDataset(config)
@@ -113,8 +112,11 @@ class StyleGAN2Trainer(pl.LightningModule):
         texture_atlas = texture_atlas.reshape((-1, texture_atlas.shape[2], texture_atlas.shape[3], texture_atlas.shape[4]))
         vertices_mapped = texture_atlas[batch["uv"][:, 0].long(), :, (batch["uv"][:, 1] * self.config.image_size).long(), (batch["uv"][:, 2] * self.config.image_size).long()]
         vertices_mapped = torch.cat([vertices_mapped, torch.ones((vertices_mapped.shape[0], 1), device=vertices_mapped.device)], dim=-1)
-        rendered_color = self.R.render(batch['vertices'], batch['indices'], vertices_mapped, batch["ranges"].cpu(), batch['bg'] if use_bg_color else None)
-        return rendered_color.permute((0, 3, 1, 2))
+        rendered_color = self.R.render(batch['vertices'], batch['indices'], vertices_mapped, batch["ranges"].cpu(), batch['bg'] if use_bg_color else None, resolution=self.config.render_size)
+        ret_val = rendered_color.permute((0, 3, 1, 2))
+        if self.config.render_size != self.config.image_size:
+            ret_val = torch.nn.functional.interpolate(ret_val, (self.config.image_size, self.config.image_size), mode='bilinear', align_corners=True)
+        return ret_val
 
     def training_step(self, batch, batch_idx):
         # optimize generator

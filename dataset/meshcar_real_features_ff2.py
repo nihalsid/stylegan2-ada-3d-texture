@@ -22,12 +22,13 @@ from util.misc import EasyDict
 
 class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
-    def __init__(self, config, limit_dataset_size=None, single_mode=False):
+    def __init__(self, config, limit_dataset_size=None, single_mode=False, fixed_view_mode=False):
         self.dataset_directory = Path(config.dataset_path)
         self.mesh_directory = Path(config.mesh_path)
         self.image_size = config.image_size
         self.random_views = config.random_views
         self.camera_noise = config.camera_noise
+        self.fixed_view_mode = fixed_view_mode
         self.real_images = {x.name.split('.')[0]: x for x in Path(config.image_path).iterdir() if x.name.endswith('.jpg') or x.name.endswith('.png')}
         self.masks = {x: Path(config.mask_path) / self.real_images[x].name for x in self.real_images}
         self.erode = config.erode
@@ -129,7 +130,10 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     def get_image_and_view(self):
         total_selections = len(self.real_images.keys()) // 8
         available_views = get_car_views()
-        view_indices = random.sample(list(range(8)), self.views_per_sample)
+        if not self.fixed_view_mode:
+            view_indices = random.sample(list(range(8)), self.views_per_sample)
+        else:
+            view_indices = list(range(self.views_per_sample))
         sampled_view = [available_views[vidx] for vidx in view_indices]
         image_indices = random.sample(list(range(total_selections)), self.views_per_sample)
         image_selections = [f'{(iidx * 8 + vidx):05d}' for (iidx, vidx) in zip(image_indices, view_indices)]
@@ -186,7 +190,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     def erode_mask(mask):
         import cv2 as cv
         mask = mask.squeeze(0).numpy().astype(np.uint8)
-        kernel_size = 1
+        kernel_size = 3
         element = cv.getStructuringElement(cv.MORPH_ELLIPSE, (2 * kernel_size + 1, 2 * kernel_size + 1), (kernel_size, kernel_size))
         mask = cv.erode(mask, element)
         return torch.from_numpy(mask).unsqueeze(0)

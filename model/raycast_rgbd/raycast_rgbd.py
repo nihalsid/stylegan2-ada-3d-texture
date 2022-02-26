@@ -149,13 +149,16 @@ class Raycast2DSparseHandler:
                                      thresh_sample_dist=50.5*0.3*trunc, ray_increment=0.3*trunc,
                                      max_num_frames=max_num_frames, max_num_locs_per_sample=96*96*96, max_pixels_per_voxel=96)
 
-    def raycast_sdf(self, sdf_dense, locs, sparse_sdf, sparse_color, view_matrix, intrinsic_matrix):
+    def raycast_sdf(self, sdf_dense, locs, sparse_sdf, sparse_color, view_matrix, intrinsic_matrix, bg=None):
         locs = torch.cat([locs[:, 1:2], locs[:, 2:3], locs[:, 3:4], locs[:, 0:1]], 1).contiguous().long()
         sparse_normals = compute_normals_from_sdf(sdf_dense, locs, torch.inverse(view_matrix))
         r_color, r_depth, r_normal = self.raycaster(locs, sparse_sdf.contiguous(), sparse_color, sparse_normals, view_matrix, intrinsic_matrix)
         r_color = r_color.clone()
         mask = r_color == -float('inf')
-        r_color[mask] = 1
+        if bg is None:
+            r_color[mask] = 1
+        else:
+            r_color = torch.where(mask, bg[:, None, None, None], r_color)
         try:
             color_crops = []
             boxes = masks_to_boxes(torch.logical_not(mask[:, :, :, 0]))
@@ -177,14 +180,16 @@ class Raycast2DSparseHandler:
                     additional_pad = int((x2 - x1) * 0.1)
                 for i in range(4):
                     pad[i // 2][i % 2] += additional_pad
-                padded = torch.ones((color_crop.shape[0], color_crop.shape[1] + pad[1][0] + pad[1][1], color_crop.shape[2] + pad[0][0] + pad[0][1]), device=color_crop.device)
+
+                padded = torch.ones((color_crop.shape[0], color_crop.shape[1] + pad[1][0] + pad[1][1], color_crop.shape[2] + pad[0][0] + pad[0][1]), device=color_crop.device) * (1 if bg is None else bg[img_idx])
                 padded[:, pad[1][0]: padded.shape[1] - pad[1][1], pad[0][0]: padded.shape[2] - pad[0][1]] = color_crop
                 # color_crop = T.Pad((pad[0][0], pad[1][0], pad[0][1], pad[1][1]), 1)(color_crop)
                 color_crop = torch.nn.functional.interpolate(padded.unsqueeze(0), size=(self.render_shape[0], self.render_shape[1]), mode='bilinear', align_corners=False).permute((0, 2, 3, 1))
                 color_crops.append(color_crop)
             ret_color = torch.cat(color_crops, dim=0)
-        except Exception:
+        except Exception as err:
             ret_color = r_color
+            print(err)
         return ret_color
 
 

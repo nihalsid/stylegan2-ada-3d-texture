@@ -276,21 +276,37 @@ def test_grid_cars_dataloader(config):
             batch = to_device(batch, torch.device("cuda"))
             shape = E(batch["x"])
             fake_grid = G(torch.randn(batch_size, 512).cuda(), shape, noise_mode='const')
-            r_color = raycast_handler.raycast_sdf(batch['x'], batch['y'],
-                                                                      batch['view'], batch['intrinsic'])
-            r_color = r_color.permute((0, 3, 1, 2)).cpu()
-            r_color = r_color.permute((0, 2, 3, 1))
-            r_color = (r_color + 1) / 2
-            for i in range(r_color.shape[0]):
-                color_i = r_color[i].numpy()
-                color_i[color_i == -float('inf')] = 1
-                color_i = color_i * 255
-                Image.fromarray(color_i.astype(np.uint8)).save(f"runs/images_sdf/render_{batch_idx * 8 + i}.jpg")
+            r_color = raycast_handler.raycast_sdf(batch['x'], batch['y'], batch['view'], batch['intrinsic'])
+            save_image(r_color, f"runs/images_sdf/render_{batch_idx}.jpg", n_row=config.batch_size, value_range=(-1, 1), normalize=True)
+
+
+@hydra.main(config_path='../config', config_name='stylegan2_car')
+def test_sparsegrid_dataloader(config):
+    from model.raycast_rgbd.raycast_rgbd import Raycast2DSparseHandler
+    from dataset.meshcar_real_sdfgrid_sparse import SparseSDFGridDataset, Collater
+    config.views_per_sample = 1
+    batch_size, render_shape = 4, (config.image_size, config.image_size)
+    dataset = SparseSDFGridDataset(config)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=Collater([], []))
+    dims = (128, 128, 128)
+    voxel_size = 0.015625
+    trunc = 5 * voxel_size
+    Path("runs/images_sparsesdf").mkdir(exist_ok=True)
+    raycast_handler = Raycast2DSparseHandler(torch.device("cuda"), batch_size, dims, render_shape, voxel_size, trunc)
+
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(tqdm(dataloader)):
+            batch = to_device(batch, torch.device("cuda"))
+            r_color = raycast_handler.raycast_sdf(batch["x_dense"], batch['sparse_data'][0], batch['sparse_data'][1],
+                                                                      batch['sparse_data'][2], batch['view'], batch['intrinsic'])
+            r_color = r_color.permute((0, 3, 1, 2))
+            save_image(r_color, f"runs/images_sparsesdf/render_{batch_idx}.jpg", n_row=batch_size, value_range=(-1, 1), normalize=True)
 
 
 if __name__ == '__main__':
     # test_view_angles_together()
-    test_uv_cars_dataloader()
+    # test_uv_cars_dataloader()
+    test_sparsegrid_dataloader()
     # test_uv_ours_dataloader()
     # test_compcars_together()
     # test_pigan_dataloader()

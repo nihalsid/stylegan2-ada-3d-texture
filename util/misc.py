@@ -1,6 +1,10 @@
+from collections import OrderedDict
+
 import torch
 from ballpark import business
 import numpy as np
+from cleanfid import fid
+from pathlib import Path
 
 
 def print_model_parameter_count(model):
@@ -100,3 +104,20 @@ class EasyDict(dict):
 
 def to_point_list(s):
     return np.concatenate([c[:, np.newaxis] for c in np.where(s)], axis=1)
+
+
+def get_parameters_from_state_dict(state_dict, filter_key):
+    new_state_dict = OrderedDict()
+    for k in state_dict:
+        if k.startswith(filter_key):
+            new_state_dict[k.replace(filter_key + '.', '')] = state_dict[k]
+    return new_state_dict
+
+
+def compute_fid(output_dir_fake, output_dir_real, filepath, device):
+    fid_score = fid.compute_fid(str(output_dir_real), str(output_dir_fake), device=device, dataset_res=256, num_workers=0)
+    print(f'FID: {fid_score:.3f}')
+    kid_score = fid.compute_kid(str(output_dir_real), str(output_dir_fake), device=device, dataset_res=256, num_workers=0)
+    print(f'KID: {kid_score:.3f}')
+    Path(filepath).write_text(f"fid = {fid_score}\nkid = {kid_score}")
+

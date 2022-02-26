@@ -38,7 +38,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
                 self.items = self.items * limit_dataset_size
         self.items = [x for x in self.items if (self.mesh_directory / x / "064.npy").exists()]
         self.target_name = "model_normalized.obj"
-        self.views_per_sample = 1
+        self.views_per_sample = config.views_per_sample
         self.color_generator = random_color if config.random_bg == 'color' else (random_grayscale if config.random_bg == 'grayscale' else white)
         self.input_feature_extractor, self.num_feats = {
             "normal": (self.input_normal, 3),

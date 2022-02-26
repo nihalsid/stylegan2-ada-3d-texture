@@ -37,9 +37,9 @@ class StyleGAN2Trainer(pl.LightningModule):
         self.config = config
         self.train_set = FaceGraphMeshDataset(config)
         self.val_set = FaceGraphMeshDataset(config, config.num_eval_images)
-        self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, channel_base=config.g_channel_base, channel_max=config.g_channel_max)
-        self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
         self.E = TwinGraphEncoder(self.train_set.num_feats, 1)
+        self.G = Generator(config.latent_dim, config.latent_dim, config.num_mapping_layers, config.num_faces, 3, e_layer_dims=self.E.layer_dims, channel_base=config.g_channel_base, channel_max=config.g_channel_max)
+        self.D = Discriminator(config.image_size, 3, w_num_layers=config.num_mapping_layers, mbstd_on=config.mbstd_on, channel_base=config.d_channel_base)
         self.R = None
         self.augment_pipe = AugmentPipe(config.ada_start_p, config.ada_target, config.ada_interval, config.ada_fixed, config.batch_size, config.views_per_sample, config.colorspace)
         # print_module_summary(self.G, (torch.zeros(self.config.batch_size, self.config.latent_dim), ))
@@ -273,6 +273,8 @@ class StyleGAN2Trainer(pl.LightningModule):
             self.ema = ExponentialMovingAverage(self.G.parameters(), 0.995)
         if self.R is None:
             self.R = DifferentiableRenderer(self.config.image_size, "bounds", self.config.colorspace)
+        if self.config.resume_ema is not None:
+            self.ema = torch.load(self.config.resume_ema, map_location=self.device)
 
 
 def step(opt, module):

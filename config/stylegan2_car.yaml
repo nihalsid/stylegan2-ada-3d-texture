@@ -105,6 +105,9 @@ resume_ema: null
 
 preload: False
 
+prog_resume_ema: "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/23020923_StyleGAN23D-CompCars_bigdtwin-clip_fg3bgg-lrd1g14-v8m8-1K_128/checkpoints/ema_000027474.pth"
+prog_resume: "/cluster_HDD/gondor/ysiddiqui/stylegan2-ada-3d-texture/runs/23020923_StyleGAN23D-CompCars_bigdtwin-clip_fg3bgg-lrd1g14-v8m8-1K_128/checkpoints/_epoch=174.ckpt"
+
 hydra:
   output_subdir: null # Disable saving of config files. We'll do that ourselves.
   run:
