@@ -57,6 +57,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         }[config.features]
         self.pair_meta, self.all_views = self.load_pair_meta(config.pairmeta_path)
         self.real_images_preloaded, self.masks_preloaded = {}, {}
+        self.stats = torch.load(config.stat_path)
         if config.preload:
             self.preload_real_images()
 

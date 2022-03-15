@@ -69,6 +69,7 @@ class SparseSDFGridDataset(torch.utils.data.Dataset):
             "faces": faces,
             "vertex_ctr": vctr,
             "vertices": vertices,
+            "orig_vertices": vertices,
             "indices_quad": indices,
             "indices": tri_indices,
             "ranges": torch.tensor([0, tri_indices.shape[0]]).int(),

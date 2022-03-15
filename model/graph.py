@@ -196,6 +196,7 @@ class GraphEncoder(torch.nn.Module):
     def __init__(self, in_channels, layer_dims=(32, 64, 64, 128, 128, 128, 256, 256), conv_layer=FaceConv, norm=torch_geometric.nn.BatchNorm):
 
         super().__init__()
+        self.layer_dims = layer_dims
         self.activation = torch.nn.LeakyReLU()
         self.enc_conv_in = torch.nn.Linear(in_channels, layer_dims[0])
         self.down_0_block_0 = FResNetBlock(layer_dims[0], layer_dims[1], conv_layer, norm, self.activation)

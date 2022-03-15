@@ -143,7 +143,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             masks.append(self.get_real_mask(c_i))
             azimuth = c_v['azimuth'] + (random.random() - 0.5) * self.camera_noise
             elevation = c_v['elevation'] + (random.random() - 0.5) * self.camera_noise
-            perspective_cam = spherical_coord_to_cam(c_v['fov'], azimuth, elevation, cam_dist=1.5)
+            perspective_cam = spherical_coord_to_cam(c_v['fov'], azimuth, elevation, cam_dist=c_v['cam_dist'])
             projection_matrix = torch.from_numpy(perspective_cam.projection_mat()).float()
             cam_position = torch.from_numpy(np.linalg.inv(perspective_cam.view_mat())[:3, 3]).float()
             view_matrix = torch.from_numpy(perspective_cam.view_mat()).float()
@@ -298,23 +298,25 @@ def white(num_views):
 
 def get_car_views():
     # front, back, right, left, front_right, front_left, back_right, back_left
+    camera_distance = [3.2, 3.2, 1.7, 1.7, 1.5, 1.5, 1.5, 1.5]
+    fov = [10, 10, 40, 40, 40, 40, 40, 40]
     azimuth = [3 * math.pi / 2, math.pi / 2,
                0, math.pi,
                math.pi + math.pi / 3, 0 - math.pi / 3,
                math.pi / 2 + math.pi / 6, math.pi / 2 - math.pi / 6]
     azimuth_noise = [0, 0,
                      0, 0,
-                     (random.random() - 0.5) * math.pi / 8, (random.random() - 0.5) * math.pi / 8,
-                     (random.random() - 0.5) * math.pi / 8, (random.random() - 0.5) * math.pi / 8,]
+                     (random.random() - 0.5) * math.pi / 7, (random.random() - 0.5) * math.pi / 7,
+                     (random.random() - 0.5) * math.pi / 7, (random.random() - 0.5) * math.pi / 7,]
     elevation = [math.pi / 2, math.pi / 2,
                  math.pi / 2, math.pi / 2,
                  math.pi / 2 - math.pi / 48, math.pi / 2 - math.pi / 48,
                  math.pi / 2 - math.pi / 48, math.pi / 2 - math.pi / 48]
-    elevation_noise = [-random.random() * math.pi / 70, -random.random() * math.pi / 70,
+    elevation_noise = [-random.random() * math.pi / 32, -random.random() * math.pi / 32,
                        0, 0,
-                       -random.random() * math.pi / 32, -random.random() * math.pi / 32,
-                       0, 0]
-    return [{'azimuth': a + an, 'elevation': e + en, 'fov': 40} for a, an, e, en in zip(azimuth, azimuth_noise, elevation, elevation_noise)]
+                       -random.random() * math.pi / 28, -random.random() * math.pi / 28,
+                       -random.random() * math.pi / 28, -random.random() * math.pi / 28,]
+    return [{'azimuth': a + an, 'elevation': e + en, 'fov': f, 'cam_dist': cd} for a, an, e, en, cd, f in zip(azimuth, azimuth_noise, elevation, elevation_noise, camera_distance, fov)]
 
 
 def rgb_to_lab(rgb_normed):
