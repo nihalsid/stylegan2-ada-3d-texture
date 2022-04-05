@@ -244,7 +244,7 @@ class StyleGAN2Trainer(pl.LightningModule):
                 z = z.to(self.device)
                 eval_batch = to_device(next(grid_loader), self.device)
                 self.set_shape_codes(eval_batch)
-                generated_colors = torch.clamp(self.G(eval_batch['graph_data'], z, eval_batch['shape'], noise_mode='const'), -1, 1)
+                generated_colors = self.G(eval_batch['graph_data'], z, eval_batch['shape'], noise_mode='const')
                 generated_colors = self.train_set.cspace_convert_back(generated_colors) * 0.5 + 0.5
                 for bidx in range(generated_colors.shape[0] // self.config.num_faces[0]):
                     self.train_set.export_mesh(eval_batch['name'][bidx],

@@ -188,6 +188,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             vertex_colors = torch.zeros(mesh.vertices.shape).to(face_colors.device)
             torch_scatter.scatter_mean(face_colors.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 3),
                                        torch.from_numpy(mesh.faces).to(face_colors.device).reshape(-1).long(), dim=0, out=vertex_colors)
+            vertex_colors = torch.clamp(vertex_colors, 0, 1)
             out_mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=vertex_colors.cpu().numpy(), process=False)
             out_mesh.export(output_path)
         except Exception as err:
