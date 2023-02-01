@@ -57,8 +57,8 @@ From project root execute:
 ```bash
 mkdir data
 cd data
-wget https://www.dropbox.com/s/imypy8erqg92p7m/photoshape-data.zip
-unzip photoshape-data.zip
+wget https://www.dropbox.com/s/or9tfmunvndibv0/data.zip
+unzip data.zip
 ```
 
 ## Output Directories
