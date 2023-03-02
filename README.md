@@ -1,6 +1,4 @@
-# stylegan2-ada-3d-texture
-
-Surface texture GAN.
+# Texturify Generating Textures on 3D Shape Surfaces
 
 ## Dependencies
 
