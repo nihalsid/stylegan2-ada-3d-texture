@@ -59,6 +59,8 @@ wget https://www.dropbox.com/s/or9tfmunvndibv0/data.zip
 unzip data.zip
 ```
 
+For custom data processing check out https://github.com/nihalsid/CADTextures
+
 ## Output Directories
 
 Create a symlink `runs` in project root from a directory `OUTPUTDIR` where outputs would be stored  
