@@ -76,6 +76,10 @@ Configuration provided with hydra config file `config/stylegan2.yaml`. Example t
 python trainer/train_stylegan_real_feature.py wandb_main=False val_check_interval=5 experiment=test_run lr_d=0.001 sanity_steps=1 lambda_gp=14 image_size=512 batch_size=4 num_mapping_layers=5 views_per_sample=2 g_channel_base=32768 random_bg=grayscale num_vis_images=256 preload=False dataset_path=data/Photoshape/shapenet-chairs-manifold-highres-part_processed_color mesh_path=data/Photoshape/shapenet-chairs-manifold-highres pairmeta_path=data/Photoshape-model/metadata/pairs.json image_path=data/Photoshape/exemplars mask_path=data/Photoshape/exemplars_mask
 ```
 
+## Checkpoints
+
+Available [here](https://www.dropbox.com/scl/fi/cz9arygdbz05gucapldd1/texturify_checkpoints.zip?rlkey=n19t8x0zq13i7hmodfnjkgrst&dl=0).
+
 ## Configuration
 
 Configuration can be overriden with command line flags.
